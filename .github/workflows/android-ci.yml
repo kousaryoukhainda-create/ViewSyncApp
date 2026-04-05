@@ -47,29 +47,13 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Download fresh Gradle Wrapper JAR
-      run: |
-        WRAPPER_JAR="gradle/wrapper/gradle-wrapper.jar"
-        WRAPPER_VERSION="8.5"
-        echo "Downloading gradle-wrapper.jar v${WRAPPER_VERSION}..."
-        # Download full Gradle distribution and extract wrapper JAR
-        curl -L -s "https://services.gradle.org/distributions/gradle-${WRAPPER_VERSION}-bin.zip" -o /tmp/gradle.zip
-        echo "Downloaded Gradle distribution: $(stat -c%s /tmp/gradle.zip) bytes"
-        unzip -q /tmp/gradle.zip -d /tmp/gradle-extract
-        cp /tmp/gradle-extract/gradle-${WRAPPER_VERSION}/lib/plugins/gradle-wrapper-${WRAPPER_VERSION}.jar "$WRAPPER_JAR"
-        rm -rf /tmp/gradle.zip /tmp/gradle-extract
-        echo "Wrapper JAR size: $(stat -c%s "$WRAPPER_JAR") bytes"
-        # Verify it's a valid JAR
-        unzip -l "$WRAPPER_JAR" | grep GradleWrapperMain || echo "ERROR: GradleWrapperMain not found!"
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '8.5'
 
     - name: Build Debug APK with Gradle
-      run: |
-        chmod +x gradlew
-        echo "=== Verifying Gradle Wrapper JAR ==="
-        ls -la gradle/wrapper/gradle-wrapper.jar
-        unzip -l gradle/wrapper/gradle-wrapper.jar | grep GradleWrapperMain || echo "CLASS NOT FOUND IN JAR!"
-        echo "=== Running Gradle ==="
-        java -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain assembleDebug --stacktrace
+      run: gradle assembleDebug --stacktrace
 
     - name: List APK output directory
       run: |
