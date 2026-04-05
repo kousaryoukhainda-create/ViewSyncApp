@@ -288,11 +288,11 @@ private fun VideoPlayerCard(
                                 }
                                 
                                 // Use IFramePlayerOptions with origin to fix Error 152-4
-                                val options = IFramePlayerOptions.Builder()
+                                val options = IFramePlayerOptions.Builder(context)
                                     .controls(1)
                                     .origin("https://$packageName")
                                     .build()
-                                
+
                                 initialize(object : AbstractYouTubePlayerListener() {
                                     override fun onReady(player: YouTubePlayer) {
                                         youtubePlayer = player
@@ -307,9 +307,9 @@ private fun VideoPlayerCard(
 
                                     override fun onError(
                                         youtubePlayer: YouTubePlayer,
-                                        errorMessage: String,
+                                        error: PlayerConstants.PlayerError,
                                     ) {
-                                        playerError = errorMessage
+                                        playerError = error.toString()
                                         isPlayerReady = false
                                     }
 
