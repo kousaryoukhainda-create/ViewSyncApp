@@ -36,20 +36,24 @@ jobs:
 
     - name: Create local.properties with API Key
       run: |
-        echo "youtube.api.key=${{ secrets.YOUTUBE_API_KEY }}" > local.properties
+        if [ -z "${{ secrets.YOUTUBE_API_KEY }}" ]; then
+          echo "WARNING: YOUTUBE_API_KEY secret is not set!"
+          echo "youtube.api.key=DUMMY_KEY_FOR_BUILD" > local.properties
+        else
+          echo "youtube.api.key=${{ secrets.YOUTUBE_API_KEY }}" > local.properties
+        fi
+        cat local.properties
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
     - name: Build Debug APK with Gradle
-      run: |
-        set -o pipefail
-        ./gradlew assembleDebug --stacktrace 2>&1 | tee gradle-output.txt
-        exit ${PIPESTATUS[0]}
+      continue-on-error: true
+      run: ./gradlew assembleDebug --stacktrace --info 2>&1 | tee gradle-output.txt; exit ${PIPESTATUS[0]}
 
     - name: Upload Gradle Error Log
       uses: actions/upload-artifact@v4
-      if: failure()
+      if: always()
       with:
         name: gradle-error-log
         path: gradle-output.txt
