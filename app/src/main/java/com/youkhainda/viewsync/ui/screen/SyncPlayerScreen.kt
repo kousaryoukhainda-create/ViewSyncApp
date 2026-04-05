@@ -232,13 +232,15 @@ private fun VideoPlayerCard(
     var currentTime by remember { mutableLongStateOf(0L) }
     var youtubePlayer by remember { mutableStateOf<YouTubePlayer?>(null) }
     var showCueDialog by remember { mutableStateOf(false) }
+    var playerError by remember { mutableStateOf<String?>(null) }
+    var isPlayerReady by remember { mutableStateOf(false) }
 
     // Validate video ID before attempting to play
     val isValidVideoId = com.youkhainda.viewsync.data.remote.YouTubeUrlParser.isValidVideoId(videoId)
 
     // Register/unregister player with controller
     DisposableEffect(videoIndex) {
-        if (isValidVideoId) {
+        if (isValidVideoId && isPlayerReady) {
             youtubePlayer?.let { player ->
                 playerController.registerPlayer(videoIndex, player)
             }
@@ -256,40 +258,61 @@ private fun VideoPlayerCard(
         Column {
             // YouTube Player
             if (isValidVideoId) {
-                AndroidView(
-                    factory = { context ->
-                        YouTubePlayerView(context).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                dpToPx(200),
-                            )
-                            addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
-                                override fun onReady(player: YouTubePlayer) {
-                                    youtubePlayer = player
-                                    playerController.registerPlayer(videoIndex, player)
-                                    player.cueVideo(videoId, offset / 1000f)
-                                }
+                if (playerError != null) {
+                    // Error state - show error message with retry option
+                    VideoPlayerErrorView(
+                        error = playerError!!,
+                        onRetry = {
+                            playerError = null
+                            isPlayerReady = false
+                            youtubePlayer = null
+                        },
+                    )
+                } else {
+                    AndroidView(
+                        factory = { context ->
+                            YouTubePlayerView(context).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    dpToPx(200),
+                                )
+                                addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
+                                    override fun onReady(player: YouTubePlayer) {
+                                        youtubePlayer = player
+                                        isPlayerReady = true
+                                        playerController.registerPlayer(videoIndex, player)
+                                        player.cueVideo(videoId, offset / 1000f)
+                                    }
 
-                                override fun onCurrentSecond(youtubePlayer: YouTubePlayer, second: Float) {
-                                    currentTime = (second * 1000).toLong()
-                                }
+                                    override fun onCurrentSecond(youtubePlayer: YouTubePlayer, second: Float) {
+                                        currentTime = (second * 1000).toLong()
+                                    }
 
-                                override fun onStateChange(
-                                youtubePlayer: YouTubePlayer,
-                                state: PlayerConstants.PlayerState,
-                            ) {
-                                // Handle state changes
+                                    override fun onError(
+                                        youtubePlayer: YouTubePlayer,
+                                        errorMessage: String,
+                                    ) {
+                                        playerError = errorMessage
+                                        isPlayerReady = false
+                                    }
+
+                                    override fun onStateChange(
+                                        youtubePlayer: YouTubePlayer,
+                                        state: PlayerConstants.PlayerState,
+                                    ) {
+                                        // Handle state changes if needed
+                                    }
+                                })
                             }
-                        })
-                    }
-                },
-                update = { view ->
-                    // Player already registered in onReady
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-            )
+                        },
+                        update = { view ->
+                            // Player already registered in onReady
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                    )
+                }
             } else {
                 // Invalid video ID - show error placeholder
                 Box(
@@ -352,6 +375,55 @@ private fun VideoPlayerCard(
                 showCueDialog = false
             },
         )
+    }
+}
+
+@Composable
+private fun VideoPlayerErrorView(
+    error: String,
+    onRetry: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp)
+            .background(MaterialTheme.colorScheme.errorContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(16.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(40.dp),
+            )
+            Text(
+                text = "This video is unavailable",
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Error: $error",
+                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Button(
+                onClick = onRetry,
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Retry")
+            }
+        }
     }
 }
 
