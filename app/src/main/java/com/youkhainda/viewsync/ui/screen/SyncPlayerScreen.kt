@@ -212,10 +212,15 @@ private fun VideoPlayerCard(
     var youtubePlayer by remember { mutableStateOf<YouTubePlayer?>(null) }
     var showCueDialog by remember { mutableStateOf(false) }
 
+    // Validate video ID before attempting to play
+    val isValidVideoId = com.youkhainda.viewsync.data.remote.YouTubeUrlParser.isValidVideoId(videoId)
+
     // Register/unregister player with controller
     DisposableEffect(videoIndex) {
-        youtubePlayer?.let { player ->
-            playerController.registerPlayer(videoIndex, player)
+        if (isValidVideoId) {
+            youtubePlayer?.let { player ->
+                playerController.registerPlayer(videoIndex, player)
+            }
         }
         onDispose {
             playerController.unregisterPlayer(videoIndex)
@@ -229,25 +234,26 @@ private fun VideoPlayerCard(
     ) {
         Column {
             // YouTube Player
-            AndroidView(
-                factory = { context ->
-                    YouTubePlayerView(context).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            dpToPx(200),
-                        )
-                        addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
-                            override fun onReady(player: YouTubePlayer) {
-                                youtubePlayer = player
-                                playerController.registerPlayer(videoIndex, player)
-                                player.cueVideo(videoId, offset / 1000f)
-                            }
+            if (isValidVideoId) {
+                AndroidView(
+                    factory = { context ->
+                        YouTubePlayerView(context).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                dpToPx(200),
+                            )
+                            addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
+                                override fun onReady(player: YouTubePlayer) {
+                                    youtubePlayer = player
+                                    playerController.registerPlayer(videoIndex, player)
+                                    player.cueVideo(videoId, offset / 1000f)
+                                }
 
-                            override fun onCurrentSecond(youtubePlayer: YouTubePlayer, second: Float) {
-                                currentTime = (second * 1000).toLong()
-                            }
+                                override fun onCurrentSecond(youtubePlayer: YouTubePlayer, second: Float) {
+                                    currentTime = (second * 1000).toLong()
+                                }
 
-                            override fun onStateChange(
+                                override fun onStateChange(
                                 youtubePlayer: YouTubePlayer,
                                 state: PlayerConstants.PlayerState,
                             ) {
@@ -263,6 +269,31 @@ private fun VideoPlayerCard(
                     .fillMaxWidth()
                     .height(200.dp),
             )
+            } else {
+                // Invalid video ID - show error placeholder
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(48.dp),
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Invalid video ID",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
 
             // Video Controls
             Row(

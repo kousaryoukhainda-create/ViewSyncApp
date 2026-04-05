@@ -4,6 +4,7 @@ import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.data.model.SyncCue
 import com.youkhainda.viewsync.data.model.YouTubeVideo
 import com.youkhainda.viewsync.data.remote.YouTubeApiService
+import com.youkhainda.viewsync.data.remote.YouTubeUrlParser
 import com.youkhainda.viewsync.data.remote.parseDuration
 import com.youkhainda.viewsync.BuildConfig
 import dagger.hilt.android.scopes.ViewModelScoped
@@ -20,17 +21,51 @@ class SyncRepository @Inject constructor(
     // In-memory storage (can be replaced with Room DB for persistence)
     private val syncSessions = mutableMapOf<String, SyncSession>()
 
+    /**
+     * Searches for YouTube videos or handles direct YouTube URLs.
+     * If the query is a YouTube URL, extracts the video ID and fetches details directly.
+     * Otherwise, performs a standard search query.
+     */
     suspend fun searchYouTubeVideos(query: String): List<YouTubeVideo> = withContext(Dispatchers.IO) {
         try {
-            val response = youtubeApi.searchVideos(
-                query = query,
-                apiKey = BuildConfig.YOUTUBE_API_KEY,
-            )
+            // Check if query is a YouTube URL
+            if (YouTubeUrlParser.isYouTubeUrl(query)) {
+                val videoId = YouTubeUrlParser.extractVideoId(query)
+                if (videoId != null) {
+                    // Fetch video details directly using the extracted video ID
+                    return@withContext fetchVideoDetails(listOf(videoId))
+                } else {
+                    // Invalid YouTube URL format
+                    return@withContext emptyList()
+                }
+            }
 
-            val videoIds = response.items.mapNotNull { it.id.videoId }
-            if (videoIds.isEmpty()) return@withContext emptyList()
+            // Standard search query
+            try {
+                val response = youtubeApi.searchVideos(
+                    query = query,
+                    apiKey = BuildConfig.YOUTUBE_API_KEY,
+                )
 
-            // Fetch video details including duration
+                val videoIds = response.items.mapNotNull { it.id.videoId }
+                if (videoIds.isEmpty()) return@withContext emptyList()
+
+                return@withContext fetchVideoDetails(videoIds)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                emptyList()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
+    /**
+     * Fetches video details from the YouTube API given a list of video IDs.
+     */
+    private suspend fun fetchVideoDetails(videoIds: List<String>): List<YouTubeVideo> = withContext(Dispatchers.IO) {
+        try {
             val detailsResponse = youtubeApi.getVideoDetails(
                 videoIds = videoIds.joinToString(","),
                 apiKey = BuildConfig.YOUTUBE_API_KEY,
@@ -40,16 +75,17 @@ class SyncRepository @Inject constructor(
                 detail.id to parseDuration(detail.contentDetails.duration)
             }
 
-            response.items.mapNotNull { item ->
+            detailsResponse.items.mapNotNull { detail ->
+                val snippet = detail.snippet
                 YouTubeVideo(
-                    videoId = item.id.videoId,
-                    title = item.snippet.title,
-                    channelTitle = item.snippet.channelTitle,
-                    thumbnailUrl = item.snippet.thumbnails.high?.url
-                        ?: item.snippet.thumbnails.medium?.url
-                        ?: item.snippet.thumbnails.default?.url
-                        ?: "",
-                    duration = durationMap[item.id.videoId] ?: 0L,
+                    videoId = detail.id,
+                    title = snippet?.title ?: "Video ${detail.id}",
+                    channelTitle = snippet?.channelTitle ?: "Unknown",
+                    thumbnailUrl = snippet?.thumbnails?.high?.url
+                        ?: snippet?.thumbnails?.medium?.url
+                        ?: snippet?.thumbnails?.default?.url
+                        ?: "https://img.youtube.com/vi/${detail.id}/hqdefault.jpg",
+                    duration = durationMap[detail.id] ?: 0L,
                 )
             }
         } catch (e: Exception) {

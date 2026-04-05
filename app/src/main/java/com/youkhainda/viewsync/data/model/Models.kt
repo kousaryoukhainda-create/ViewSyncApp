@@ -82,6 +82,7 @@ data class YouTubeVideoDetailsResponse(
 @Serializable
 data class YouTubeVideoDetails(
     val id: String,
+    val snippet: YouTubeSnippet? = null,
     val contentDetails: YouTubeContentDetails,
 )
 

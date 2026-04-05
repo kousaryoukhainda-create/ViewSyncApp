@@ -6,6 +6,7 @@ import com.youkhainda.viewsync.data.model.SyncCue
 import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.data.model.SyncState
 import com.youkhainda.viewsync.data.model.YouTubeVideo
+import com.youkhainda.viewsync.data.remote.YouTubeUrlParser
 import com.youkhainda.viewsync.data.repository.SyncRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -141,12 +142,43 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
-            
+
+            // Validate input
+            if (query.isBlank()) {
+                _error.value = "Please enter a search query or YouTube URL"
+                _isLoading.value = false
+                return@launch
+            }
+
+            // Check if it's a YouTube URL but invalid format
+            if (YouTubeUrlParser.isYouTubeUrl(query)) {
+                val videoId = YouTubeUrlParser.extractVideoId(query)
+                if (videoId == null) {
+                    _error.value = "Invalid YouTube URL format. Please check the URL and try again."
+                    _isLoading.value = false
+                    _searchResults.value = emptyList()
+                    return@launch
+                }
+            }
+
             try {
                 val results = repository.searchYouTubeVideos(query)
                 _searchResults.value = results
+                
+                // Provide feedback if no results found
+                if (results.isEmpty()) {
+                    if (YouTubeUrlParser.isYouTubeUrl(query)) {
+                        _error.value = "Video not found. The video may be private or deleted."
+                    } else {
+                        _error.value = "No videos found for \"$query\""
+                    }
+                }
             } catch (e: Exception) {
-                _error.value = e.message ?: "Search failed"
+                _error.value = if (YouTubeUrlParser.isYouTubeUrl(query)) {
+                    "Failed to load video: ${e.message ?: "Unknown error"}"
+                } else {
+                    "Search failed: ${e.message ?: "Unknown error"}"
+                }
             } finally {
                 _isLoading.value = false
             }
