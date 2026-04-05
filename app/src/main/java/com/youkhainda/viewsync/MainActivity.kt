@@ -49,8 +49,7 @@ fun ViewSyncApp() {
         startDestination = NavigationRoute.SEARCH.route,
     ) {
         addSearchRoute(navController)
-        addPlayerRoute(navController)
-        addAddVideoRoute(navController)
+        addSessionGraph(navController)
     }
 }
 
@@ -58,7 +57,7 @@ private fun NavGraphBuilder.addSearchRoute(navController: NavController) {
     composable(NavigationRoute.SEARCH.route) {
         VideoSearchScreen(
             onSessionCreated = { sessionId ->
-                navController.navigate(NavigationRoute.PLAYER.route.replace("{sessionId}", sessionId)) {
+                navController.navigate(NavigationRoute.SESSION_GRAPH.route.replace("{sessionId}", sessionId)) {
                     popUpTo(NavigationRoute.SEARCH.route) { saveState = true }
                     launchSingleTop = true
                     restoreState = true
@@ -68,44 +67,47 @@ private fun NavGraphBuilder.addSearchRoute(navController: NavController) {
     }
 }
 
-private fun NavGraphBuilder.addPlayerRoute(navController: NavController) {
-    composable(
-        route = NavigationRoute.PLAYER.route,
-    ) { backStackEntry ->
-        val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
-        val parentEntry = backStackEntry.parent ?: return@composable
-        val viewModel: SyncPlayerViewModel = hiltViewModel(parentEntry)
-        SyncPlayerScreen(
-            sessionId = sessionId,
-            viewModel = viewModel,
-            onAddVideo = {
-                navController.navigate(NavigationRoute.ADD_VIDEO.route.replace("{sessionId}", sessionId))
-            },
-        )
-    }
-}
-
-private fun NavGraphBuilder.addAddVideoRoute(navController: NavController) {
-    composable(
-        route = NavigationRoute.ADD_VIDEO.route,
+private fun NavGraphBuilder.addSessionGraph(navController: NavController) {
+    navigation(
+        startDestination = NavigationRoute.PLAYER.route,
+        route = NavigationRoute.SESSION_GRAPH.route,
         arguments = listOf(
             navArgument("sessionId") { type = NavType.StringType },
         ),
-    ) { backStackEntry ->
-        val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
-        val parentEntry = backStackEntry.parent ?: return@composable
-        val viewModel: SyncPlayerViewModel = hiltViewModel(parentEntry)
-        AddVideoScreen(
-            onAddVideos = { videos ->
-                viewModel.addVideosToSession(sessionId, videos)
-                navController.popBackStack()
-            },
-        )
+    ) {
+        composable(NavigationRoute.PLAYER.route) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
+            val viewModel: SyncPlayerViewModel = hiltViewModel()
+            SyncPlayerScreen(
+                sessionId = sessionId,
+                viewModel = viewModel,
+                onAddVideo = {
+                    navController.navigate(NavigationRoute.ADD_VIDEO.route.replace("{sessionId}", sessionId))
+                },
+            )
+        }
+
+        composable(
+            route = NavigationRoute.ADD_VIDEO.route,
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
+            val viewModel: SyncPlayerViewModel = hiltViewModel()
+            AddVideoScreen(
+                onAddVideos = { videos ->
+                    viewModel.addVideosToSession(sessionId, videos)
+                    navController.popBackStack()
+                },
+            )
+        }
     }
 }
 
 sealed class NavigationRoute(val route: String) {
     data object SEARCH : NavigationRoute("search")
+    data object SESSION_GRAPH : NavigationRoute("session_graph/{sessionId}")
     data object PLAYER : NavigationRoute("player/{sessionId}")
     data object ADD_VIDEO : NavigationRoute("add_video/{sessionId}")
 }
