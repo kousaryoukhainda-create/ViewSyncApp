@@ -22,28 +22,26 @@ jobs:
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
+      with:
+        accept-android-sdk-licenses: false
 
     - name: Accept all Android SDK licenses
       run: |
         mkdir -p "$ANDROID_HOME/licenses"
-        # android-sdk-license
         echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > "$ANDROID_HOME/licenses/android-sdk-license"
         echo -e "\nd56f5187479451eabf01fb78af6dfcb131a6481e" >> "$ANDROID_HOME/licenses/android-sdk-license"
         echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" >> "$ANDROID_HOME/licenses/android-sdk-license"
-        # android-sdk-preview-license
         echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-        # android-sdk-arm-dbt-license
         echo -e "\n504667f4c0de7af1a06de97ab076b1935551704c" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
-        # android-googletv-license
         echo -e "\n86f3477f4eb0b5ef09e39b708be7c3c4a9311e0d" > "$ANDROID_HOME/licenses/android-googletv-license"
-        # android-googlexr-license
         echo -e "\n529909778c99d7e60b4809645576c95c4e44701c" > "$ANDROID_HOME/licenses/android-googlexr-license"
-        # google-gdk-license
         echo -e "\n601085b99cd563e5c3088dc08c1b847804f4e40a" > "$ANDROID_HOME/licenses/google-gdk-license"
+        echo "License files written successfully."
+        ls -la "$ANDROID_HOME/licenses/"
 
     - name: Install required Android SDK components
       run: |
-        sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools" --no_https
+        sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
     - name: Create local.properties with API Key
       run: |
