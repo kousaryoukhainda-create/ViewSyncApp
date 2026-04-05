@@ -23,16 +23,13 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Accept Android SDK licenses
-      run: |
-        mkdir -p "$ANDROID_HOME/licenses"
-        echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > "$ANDROID_HOME/licenses/android-sdk-license"
-        echo -e "\nd56f5187479451eabf01fb78af6dfcb131a6481e" >> "$ANDROID_HOME/licenses/android-sdk-license"
-        echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" >> "$ANDROID_HOME/licenses/android-sdk-license"
-
     - name: Install required Android SDK components
       run: |
         sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+    - name: Accept Android SDK licenses
+      run: |
+        yes | sdkmanager --licenses
 
     - name: Create local.properties with API Key
       run: |
