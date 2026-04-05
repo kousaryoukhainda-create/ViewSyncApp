@@ -11,9 +11,10 @@ object YouTubeUrlParser {
      */
     fun isYouTubeUrl(input: String): Boolean {
         val trimmed = input.trim()
-        return trimmed.contains("youtu\.be", RegexOption.IGNORE_CASE) ||
-               trimmed.contains("youtube\.com", RegexOption.IGNORE_CASE) ||
-               trimmed.contains("youtube\.be", RegexOption.IGNORE_CASE)
+        val lower = trimmed.lowercase()
+        return lower.contains("youtu.be") ||
+               lower.contains("youtube.com") ||
+               lower.contains("youtube.be")
     }
 
     /**
