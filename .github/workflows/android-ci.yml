@@ -41,7 +41,7 @@ jobs:
 
     - name: Install required Android SDK components
       run: |
-        sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+        sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
     - name: Create local.properties with API Key
       run: |
@@ -59,7 +59,7 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
       with:
-        gradle-version: '8.5'
+        gradle-version: '8.9'
 
     - name: Build Debug APK with Gradle
       run: gradle assembleDebug --stacktrace
