@@ -112,7 +112,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.5.0")
 
     // YouTube Player
-    implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
+    implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:13.0.0")
 
     // ExoPlayer (alternative/backup)
     implementation("androidx.media3:media3-exoplayer:1.2.0")

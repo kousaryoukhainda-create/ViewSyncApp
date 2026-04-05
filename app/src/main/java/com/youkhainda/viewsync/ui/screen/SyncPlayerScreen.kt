@@ -22,6 +22,7 @@ import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFramePlayerOptions
 import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerUiState
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerViewModel
@@ -276,7 +277,23 @@ private fun VideoPlayerCard(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     dpToPx(200),
                                 )
-                                addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
+                                
+                                // Configure WebView with proper referrer headers to fix Error 152
+                                val packageName = context.packageName
+                                val webView = this.getChildAt(0) as? android.webkit.WebView
+                                webView?.settings?.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
+                                }
+                                
+                                // Use IFramePlayerOptions with origin to fix Error 152-4
+                                val options = IFramePlayerOptions.Builder()
+                                    .controls(1)
+                                    .origin("https://$packageName")
+                                    .build()
+                                
+                                initialize(object : AbstractYouTubePlayerListener() {
                                     override fun onReady(player: YouTubePlayer) {
                                         youtubePlayer = player
                                         isPlayerReady = true
@@ -302,7 +319,7 @@ private fun VideoPlayerCard(
                                     ) {
                                         // Handle state changes if needed
                                     }
-                                })
+                                }, options)
                             }
                         },
                         update = { view ->
