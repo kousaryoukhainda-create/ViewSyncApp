@@ -114,14 +114,16 @@ class SyncPlayerViewModel @Inject constructor(
         }
     }
 
-    fun addVideosToSession(videos: List<YouTubeVideo>) {
+    fun addVideosToSession(sessionId: String, videos: List<YouTubeVideo>) {
         viewModelScope.launch {
-            val sessionId = currentSessionId ?: return@launch
             val updatedSession = repository.addVideosToSession(sessionId, videos)
             if (updatedSession != null) {
-                val offsets = repository.calculateVideoOffsets(sessionId)
-                _videoOffsets.value = offsets
-                _uiState.value = SyncPlayerUiState.Success(updatedSession)
+                // Only update offsets and UI if this is the current session
+                if (currentSessionId == sessionId) {
+                    val offsets = repository.calculateVideoOffsets(sessionId)
+                    _videoOffsets.value = offsets
+                    _uiState.value = SyncPlayerUiState.Success(updatedSession)
+                }
             }
         }
     }

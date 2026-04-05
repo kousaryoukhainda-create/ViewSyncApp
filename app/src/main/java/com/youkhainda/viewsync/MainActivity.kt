@@ -73,7 +73,8 @@ private fun NavGraphBuilder.addPlayerRoute(navController: NavController) {
         route = NavigationRoute.PLAYER.route,
     ) { backStackEntry ->
         val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
-        val viewModel: SyncPlayerViewModel = hiltViewModel()
+        val parentEntry = backStackEntry.parent ?: return@composable
+        val viewModel: SyncPlayerViewModel = hiltViewModel(parentEntry)
         SyncPlayerScreen(
             sessionId = sessionId,
             viewModel = viewModel,
@@ -92,13 +93,13 @@ private fun NavGraphBuilder.addAddVideoRoute(navController: NavController) {
         ),
     ) { backStackEntry ->
         val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
-        val viewModel: SyncPlayerViewModel = hiltViewModel(backStackEntry)
+        val parentEntry = backStackEntry.parent ?: return@composable
+        val viewModel: SyncPlayerViewModel = hiltViewModel(parentEntry)
         AddVideoScreen(
             onAddVideos = { videos ->
-                viewModel.addVideosToSession(videos)
+                viewModel.addVideosToSession(sessionId, videos)
                 navController.popBackStack()
             },
-            viewModel = viewModel,
         )
     }
 }
