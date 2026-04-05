@@ -61,19 +61,16 @@ jobs:
         echo "Wrapper JAR size: $(stat -c%s "$WRAPPER_JAR") bytes"
 
     - name: Build Debug APK with Gradle
-      continue-on-error: true
-      run: ./gradlew assembleDebug --stacktrace --info 2>&1 | tee gradle-output.txt; exit ${PIPESTATUS[0]}
+      run: ./gradlew assembleDebug --stacktrace
 
-    - name: Upload Gradle Error Log
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: gradle-error-log
-        path: gradle-output.txt
+    - name: List APK output directory
+      run: |
+        echo "APK output directory:"
+        ls -la app/build/outputs/apk/debug/ || echo "Directory not found!"
+        find . -name "*.apk" -type f 2>/dev/null
 
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
-      if: success()
       with:
         name: debug-apk
         path: app/build/outputs/apk/debug/*.apk
