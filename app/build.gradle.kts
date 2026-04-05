@@ -60,7 +60,7 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.11"
+        kotlinCompilerExtensionVersion = "1.5.15"
     }
 
     packaging {
@@ -95,9 +95,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
 
     // Hilt
-    implementation("com.google.dagger:hilt-android:2.50")
-    kapt("com.google.dagger:hilt-compiler:2.50")
-    implementation("androidx.hilt:hilt-navigation-compose:1.1.0")
+    implementation("com.google.dagger:hilt-android:2.53")
+    kapt("com.google.dagger:hilt-compiler:2.53")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Retrofit & OkHttp
     implementation("com.squareup.retrofit2:retrofit:2.10.0")
