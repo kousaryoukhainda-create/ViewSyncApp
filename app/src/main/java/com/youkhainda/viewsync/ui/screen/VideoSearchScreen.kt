@@ -6,9 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -50,24 +48,20 @@ fun VideoSearchScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+            .padding(16.dp),
     ) {
         // Search Bar
         SearchBar(
             query = searchQuery,
             onQueryChange = { searchQuery = it },
             onSearch = { viewModel.searchVideos(it) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
         )
 
         // Error Message
         if (!error.isNullOrEmpty()) {
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.errorContainer,
                 shape = RoundedCornerShape(8.dp),
             ) {
@@ -103,7 +97,7 @@ fun VideoSearchScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .weight(1f),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(searchResults) { video ->
@@ -130,13 +124,9 @@ fun VideoSearchScreen(
                     selectedVideos.value = selectedVideos.value.filter { it.videoId != videoId }
                 },
                 onCreateSession = { showCreateDialog = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
     }
 
     // Create Session Dialog
