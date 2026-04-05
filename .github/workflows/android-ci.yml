@@ -63,7 +63,10 @@ jobs:
     - name: Build Debug APK with Gradle
       run: |
         chmod +x gradlew
-        # Run gradle directly via java instead of using gradlew script
+        echo "=== Verifying Gradle Wrapper JAR ==="
+        ls -la gradle/wrapper/gradle-wrapper.jar
+        unzip -l gradle/wrapper/gradle-wrapper.jar | grep GradleWrapperMain || echo "CLASS NOT FOUND IN JAR!"
+        echo "=== Running Gradle ==="
         java -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain assembleDebug --stacktrace
 
     - name: List APK output directory
