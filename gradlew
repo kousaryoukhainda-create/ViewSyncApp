@@ -17,7 +17,13 @@
 #
 
 APP_HOME=$( cd "${0%[/\\]*}" > /dev/null && pwd ) || exit
-APP_HOME=${APP_HOME%/*}
+
+# Resolve APP_HOME if it's a symlink
+while [ -h "$APP_HOME" ]; do
+  cd "$(dirname "$APP_HOME")" || exit
+  APP_HOME=$(pwd)
+done
+
 CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
 
 JAVACMD=java
