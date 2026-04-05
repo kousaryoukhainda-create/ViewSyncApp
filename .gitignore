@@ -1,0 +1,49 @@
+# Gradle files
+.gradle/
+build/
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Local configuration file
+local.properties
+
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Android Studio
+.cxx/
+.externalNativeBuild/
+.metadata
+
+# Lint results
+lint-results*.xml
+lint-results*.html
+
+# Keystore files
+*.jks
+*.keystore
+
+# Environment files
+.env
+.env.local
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.asc
+
+# Logs
+*.log
+
+# Output directories
+out/
+gen/

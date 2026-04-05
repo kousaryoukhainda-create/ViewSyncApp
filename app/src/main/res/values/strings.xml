@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViewSync</string>
+    <string name="search_hint">Search YouTube videos…</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="rewind">Rewind</string>
+    <string name="fast_forward">Fast forward</string>
+    <string name="record_sync_cue">Record sync cue</string>
+    <string name="generate_share_link">Generate Share Link</string>
+    <string name="sync_cues">Sync Cues</string>
+    <string name="playback_controls">Playback Controls</string>
+    <string name="cue_description_hint">Cue description (optional)</string>
+    <string name="confirm">Confirm</string>
+    <string name="cancel">Cancel</string>
+    <string name="error">Error</string>
+    <string name="loading">Loading…</string>
+    <string name="session_not_found">Session not found</string>
+    <string name="videos_count">%d videos</string>
+    <string name="sync_cues_count">%d sync cues</string>
+    <string name="video_label">Video %d</string>
+</resources>
