@@ -27,6 +27,31 @@ fun VideoSearchScreen(
     onSessionCreated: (String) -> Unit,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
+    VideoSearchContent(
+        onSessionCreated = onSessionCreated,
+        onAddVideos = null,
+        viewModel = viewModel,
+    )
+}
+
+@Composable
+fun AddVideoScreen(
+    onAddVideos: (List<YouTubeVideo>) -> Unit,
+    viewModel: SearchViewModel = hiltViewModel(),
+) {
+    VideoSearchContent(
+        onSessionCreated = null,
+        onAddVideos = onAddVideos,
+        viewModel = viewModel,
+    )
+}
+
+@Composable
+private fun VideoSearchContent(
+    onSessionCreated: ((String) -> Unit)?,
+    onAddVideos: ((List<YouTubeVideo>) -> Unit)?,
+    viewModel: SearchViewModel,
+) {
     val searchResults by viewModel.searchResults.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -37,10 +62,12 @@ fun VideoSearchScreen(
     var sessionName by remember { mutableStateOf("") }
     var showCreateDialog by remember { mutableStateOf(false) }
 
+    val isAddMode = onAddVideos != null
+
     // Navigate when session is created
     LaunchedEffect(createdSessionId) {
         createdSessionId?.let { sessionId ->
-            onSessionCreated(sessionId)
+            onSessionCreated?.invoke(sessionId)
             viewModel.clearCreatedSessionId()
         }
     }
@@ -118,19 +145,32 @@ fun VideoSearchScreen(
 
         // Selected Videos Summary
         if (selectedVideos.value.isNotEmpty()) {
-            SelectedVideosSummary(
-                videos = selectedVideos.value,
-                onRemove = { videoId ->
-                    selectedVideos.value = selectedVideos.value.filter { it.videoId != videoId }
-                },
-                onCreateSession = { showCreateDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (isAddMode) {
+                AddVideosSummary(
+                    videos = selectedVideos.value,
+                    onRemove = { videoId ->
+                        selectedVideos.value = selectedVideos.value.filter { it.videoId != videoId }
+                    },
+                    onAdd = {
+                        onAddVideos!!.invoke(selectedVideos.value)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                SelectedVideosSummary(
+                    videos = selectedVideos.value,
+                    onRemove = { videoId ->
+                        selectedVideos.value = selectedVideos.value.filter { it.videoId != videoId }
+                    },
+                    onCreateSession = { showCreateDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 
-    // Create Session Dialog
-    if (showCreateDialog) {
+    // Create Session Dialog (only in create mode)
+    if (showCreateDialog && !isAddMode) {
         CreateSessionDialog(
             onDismiss = { showCreateDialog = false },
             onConfirm = { name ->
@@ -322,6 +362,79 @@ private fun SelectedVideosSummary(
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Create Sync Session")
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddVideosSummary(
+    videos: List<YouTubeVideo>,
+    onRemove: (String) -> Unit,
+    onAdd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Add Videos to Session (${videos.size})",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                videos.forEach { video ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.1f),
+                                RoundedCornerShape(4.dp),
+                            )
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = video.title,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
+
+                        IconButton(
+                            onClick = { onRemove(video.videoId) },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Remove",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = onAdd,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Add to Session")
             }
         }
     }

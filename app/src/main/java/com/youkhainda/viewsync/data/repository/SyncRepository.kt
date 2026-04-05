@@ -116,6 +116,17 @@ class SyncRepository @Inject constructor(
         return syncSessions.values.toList()
     }
 
+    suspend fun addVideosToSession(sessionId: String, videos: List<YouTubeVideo>): SyncSession? = withContext(Dispatchers.Default) {
+        val session = syncSessions[sessionId] ?: return@withContext null
+        val newVideoIds = videos.map { it.videoId }
+        val updatedSession = session.copy(
+            videoIds = session.videoIds + newVideoIds,
+            updatedAt = System.currentTimeMillis(),
+        )
+        syncSessions[sessionId] = updatedSession
+        updatedSession
+    }
+
     suspend fun addSyncCue(sessionId: String, cue: SyncCue): Boolean = withContext(Dispatchers.Default) {
         val session = syncSessions[sessionId] ?: return@withContext false
         val updatedSession = session.copy(

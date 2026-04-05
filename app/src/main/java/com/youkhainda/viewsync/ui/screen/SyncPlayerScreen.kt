@@ -41,6 +41,7 @@ interface PlayerController {
 fun SyncPlayerScreen(
     sessionId: String,
     viewModel: SyncPlayerViewModel = hiltViewModel(),
+    onAddVideo: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
@@ -73,6 +74,7 @@ fun SyncPlayerScreen(
                     onSeek = { viewModel.seekToPosition(it) },
                     onRecordCue = { videoIdx, time, desc -> viewModel.recordSyncCue(videoIdx, time, desc) },
                     onGenerateLink = { viewModel.generateShareLink() },
+                    onAddVideo = onAddVideo,
                 )
             }
 
@@ -94,6 +96,7 @@ private fun SyncPlayerContent(
     onSeek: (Long) -> Unit,
     onRecordCue: (Int, Long, String) -> Unit,
     onGenerateLink: () -> Unit,
+    onAddVideo: () -> Unit,
 ) {
     val scrollState = rememberScrollState()
 
@@ -111,22 +114,40 @@ private fun SyncPlayerContent(
             color = MaterialTheme.colorScheme.primary,
             shape = RoundedCornerShape(8.dp),
         ) {
-            Column(
+            Row(
                 modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = session.name,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "${session.videoIds.size} videos | ${session.syncCues.size} sync cues",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
-                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = session.name,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "${session.videoIds.size} videos | ${session.syncCues.size} sync cues",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
+                    )
+                }
+
+                IconButton(
+                    onClick = onAddVideo,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add video",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
             }
         }
 
