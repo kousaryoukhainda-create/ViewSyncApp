@@ -52,13 +52,15 @@ jobs:
         WRAPPER_JAR="gradle/wrapper/gradle-wrapper.jar"
         WRAPPER_VERSION="8.5"
         echo "Downloading gradle-wrapper.jar v${WRAPPER_VERSION}..."
-        if ! curl -L -s "https://github.com/gradle/gradle/raw/v${WRAPPER_VERSION}/gradle/wrapper/gradle-wrapper.jar" -o "$WRAPPER_JAR"; then
-          echo "Falling back to Gradle distribution..."
-          curl -L -s "https://services.gradle.org/distributions/gradle-${WRAPPER_VERSION}-bin.zip" -o /tmp/gradle.zip
-          unzip -p /tmp/gradle.zip "gradle-${WRAPPER_VERSION}/lib/plugins/gradle-wrapper-${WRAPPER_VERSION}.jar" > "$WRAPPER_JAR"
-          rm -f /tmp/gradle.zip
-        fi
+        # Download full Gradle distribution and extract wrapper JAR
+        curl -L -s "https://services.gradle.org/distributions/gradle-${WRAPPER_VERSION}-bin.zip" -o /tmp/gradle.zip
+        echo "Downloaded Gradle distribution: $(stat -c%s /tmp/gradle.zip) bytes"
+        unzip -q /tmp/gradle.zip -d /tmp/gradle-extract
+        cp /tmp/gradle-extract/gradle-${WRAPPER_VERSION}/lib/plugins/gradle-wrapper-${WRAPPER_VERSION}.jar "$WRAPPER_JAR"
+        rm -rf /tmp/gradle.zip /tmp/gradle-extract
         echo "Wrapper JAR size: $(stat -c%s "$WRAPPER_JAR") bytes"
+        # Verify it's a valid JAR
+        unzip -l "$WRAPPER_JAR" | grep GradleWrapperMain || echo "ERROR: GradleWrapperMain not found!"
 
     - name: Build Debug APK with Gradle
       run: |
