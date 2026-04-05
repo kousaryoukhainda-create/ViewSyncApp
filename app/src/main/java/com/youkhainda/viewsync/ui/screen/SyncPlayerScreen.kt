@@ -287,10 +287,10 @@ private fun VideoPlayerCard(
                                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
                                 }
                                 
-                                // Use IFramePlayerOptions with origin to fix Error 152-4
+                                // Use IFramePlayerOptions with youtube-nocookie.com origin to fix Error 152-4
                                 val options = IFramePlayerOptions.Builder(context)
                                     .controls(1)
-                                    .origin("https://$packageName")
+                                    .origin("https://www.youtube-nocookie.com")
                                     .build()
 
                                 initialize(object : AbstractYouTubePlayerListener() {
