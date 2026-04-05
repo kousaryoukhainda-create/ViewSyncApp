@@ -10,6 +10,13 @@ android {
     namespace = "com.youkhainda.viewsync"
     compileSdk = 34
 
+    // Load local properties
+    val localProperties = java.util.Properties()
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localProperties.load(localPropertiesFile.inputStream())
+    }
+
     defaultConfig {
         applicationId = "com.youkhainda.viewsync"
         minSdk = 24
@@ -22,7 +29,8 @@ android {
             useSupportLibrary = true
         }
 
-        buildConfigField("String", "YOUTUBE_API_KEY", "\"YOUR_YOUTUBE_API_KEY\"")
+        val youtubeApiKey = localProperties.getProperty("youtube.api.key") ?: "YOUR_YOUTUBE_API_KEY"
+        buildConfigField("String", "YOUTUBE_API_KEY", "\"$youtubeApiKey\"")
     }
 
     buildTypes {
@@ -96,6 +104,9 @@ dependencies {
 
     // Kotlinx Serialization
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+
+    // Coil for image loading
+    implementation("io.coil-kt:coil-compose:2.5.0")
 
     // YouTube Player
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
