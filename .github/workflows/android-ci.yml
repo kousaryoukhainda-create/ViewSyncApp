@@ -20,6 +20,13 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
+    - name: Accept Android SDK licenses
+      run: |
+        mkdir -p "$ANDROID_HOME/licenses"
+        echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > "$ANDROID_HOME/licenses/android-sdk-license"
+        echo -e "\nd56f5187479451eabf01fb78af6dfcb131a6481e" >> "$ANDROID_HOME/licenses/android-sdk-license"
+        echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" >> "$ANDROID_HOME/licenses/android-sdk-license"
+
     - name: Create local.properties with API Key
       run: |
         echo "youtube.api.key=${{ secrets.YOUTUBE_API_KEY }}" > local.properties
@@ -28,10 +35,11 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build Debug APK with Gradle
-      run: ./gradlew assembleDebug
+      run: ./gradlew assembleDebug --stacktrace --info
 
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: debug-apk
         path: app/build/outputs/apk/debug/*.apk
