@@ -61,7 +61,10 @@ jobs:
         echo "Wrapper JAR size: $(stat -c%s "$WRAPPER_JAR") bytes"
 
     - name: Build Debug APK with Gradle
-      run: ./gradlew assembleDebug --stacktrace
+      run: |
+        chmod +x gradlew
+        # Run gradle directly via java instead of using gradlew script
+        java -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain assembleDebug --stacktrace
 
     - name: List APK output directory
       run: |
