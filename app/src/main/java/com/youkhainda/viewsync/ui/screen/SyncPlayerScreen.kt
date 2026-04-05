@@ -19,6 +19,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerUiState
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerViewModel
@@ -246,7 +247,7 @@ private fun VideoPlayerCard(
 
                             override fun onStateChange(
                                 youtubePlayer: YouTubePlayer,
-                                state: com.pierfrancescosoffritti.androidyoutubeplayer.core.enums.YouTubePlayerState,
+                                state: PlayerConstants.PlayerState,
                             ) {
                                 // Handle state changes
                             }
