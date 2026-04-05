@@ -4,6 +4,8 @@ import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -250,11 +252,6 @@ private fun VideoPlayerCard(
                                 state: PlayerConstants.PlayerState,
                             ) {
                                 // Handle state changes
-                            }
-
-                            override fun onReleased(player: YouTubePlayer) {
-                                playerController.unregisterPlayer(videoIndex)
-                                super.onReleased(player)
                             }
                         })
                     }

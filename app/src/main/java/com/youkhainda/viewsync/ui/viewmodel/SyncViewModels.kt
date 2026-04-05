@@ -105,12 +105,10 @@ class SyncPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val sessionId = currentSessionId ?: return@launch
             val link = repository.generateShareLink(sessionId)
-            _uiState.value = let {
-                if (it is SyncPlayerUiState.Success) {
-                    it.copy(shareLink = link)
-                } else {
-                    it
-                }
+            val currentState = _uiState.value
+            _uiState.value = when (currentState) {
+                is SyncPlayerUiState.Success -> currentState.copy(shareLink = link)
+                else -> currentState
             }
         }
     }
