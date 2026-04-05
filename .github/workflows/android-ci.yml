@@ -47,6 +47,19 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    - name: Download fresh Gradle Wrapper JAR
+      run: |
+        WRAPPER_JAR="gradle/wrapper/gradle-wrapper.jar"
+        WRAPPER_VERSION="8.5"
+        echo "Downloading gradle-wrapper.jar v${WRAPPER_VERSION}..."
+        if ! curl -L -s "https://github.com/gradle/gradle/raw/v${WRAPPER_VERSION}/gradle/wrapper/gradle-wrapper.jar" -o "$WRAPPER_JAR"; then
+          echo "Falling back to Gradle distribution..."
+          curl -L -s "https://services.gradle.org/distributions/gradle-${WRAPPER_VERSION}-bin.zip" -o /tmp/gradle.zip
+          unzip -p /tmp/gradle.zip "gradle-${WRAPPER_VERSION}/lib/plugins/gradle-wrapper-${WRAPPER_VERSION}.jar" > "$WRAPPER_JAR"
+          rm -f /tmp/gradle.zip
+        fi
+        echo "Wrapper JAR size: $(stat -c%s "$WRAPPER_JAR") bytes"
+
     - name: Build Debug APK with Gradle
       continue-on-error: true
       run: ./gradlew assembleDebug --stacktrace --info 2>&1 | tee gradle-output.txt; exit ${PIPESTATUS[0]}
