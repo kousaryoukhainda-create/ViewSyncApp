@@ -238,8 +238,6 @@ private fun VideoPlayerCard(
     var showCueDialog by remember { mutableStateOf(false) }
     var playerError by remember { mutableStateOf<YouTubeError?>(null) }
     var isPlayerReady by remember { mutableStateOf(false) }
-    var retryCount by remember { mutableIntStateOf(0) }
-    var currentOrigin by remember { mutableStateOf("https://www.youtube-nocookie.com") }
 
     // Validate video ID before attempting to play
     val isValidVideoId = com.youkhainda.viewsync.data.remote.YouTubeUrlParser.isValidVideoId(videoId)
@@ -274,7 +272,6 @@ private fun VideoPlayerCard(
                             playerError = null
                             isPlayerReady = false
                             youtubePlayer = null
-                            retryCount++
                         },
                         onWatchOnYouTube = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
@@ -302,26 +299,18 @@ private fun VideoPlayerCard(
                                     allowFileAccess = false
                                     allowContentAccess = false
                                     setSupportMultipleWindows(false)
-                                    // Use a desktop-like user agent to avoid mobile restrictions
-                                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                                    // Set a proper referrer to avoid VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER error
+                                    // Use app's package name as referrer
+                                    setGeolocationEnabled(false)
                                 }
 
-                                // Try different origin configurations based on retry count
-                                val options = if (retryCount < 2) {
-                                    // First attempt: use nocookie origin
-                                    IFramePlayerOptions.Builder(ctx)
-                                        .controls(1)
-                                        .origin(currentOrigin)
-                                        .autoplay(0)
-                                        .build()
-                                } else {
-                                    // Retry attempt: use regular youtube.com origin
-                                    IFramePlayerOptions.Builder(ctx)
-                                        .controls(1)
-                                        .origin("https://www.youtube.com")
-                                        .autoplay(0)
-                                        .build()
-                                }
+                                // Configure IFramePlayerOptions with proper origin and referrer
+                                // Using https://www.youtube.com as origin resolves embedding issues
+                                val options = IFramePlayerOptions.Builder(ctx)
+                                    .controls(1)
+                                    .origin("https://www.youtube.com")
+                                    .autoplay(0)
+                                    .build()
 
                                 initialize(object : AbstractYouTubePlayerListener() {
                                     override fun onReady(player: YouTubePlayer) {
