@@ -277,7 +277,10 @@ private fun VideoPlayerCard(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     dpToPx(200),
                                 )
-                                
+
+                                // Disable automatic initialization since we're initializing manually
+                                enableAutomaticInitialization = false
+
                                 // Configure WebView with proper referrer headers to fix Error 152
                                 val packageName = context.packageName
                                 val webView = this.getChildAt(0) as? android.webkit.WebView
@@ -286,7 +289,7 @@ private fun VideoPlayerCard(
                                     domStorageEnabled = true
                                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
                                 }
-                                
+
                                 // Use IFramePlayerOptions with youtube-nocookie.com origin to fix Error 152-4
                                 val options = IFramePlayerOptions.Builder(context)
                                     .controls(1)
