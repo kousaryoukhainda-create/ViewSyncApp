@@ -3,7 +3,9 @@ package com.youkhainda.viewsync.ui.screen
 import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -299,9 +301,37 @@ private fun VideoPlayerCard(
                                     allowFileAccess = false
                                     allowContentAccess = false
                                     setSupportMultipleWindows(false)
-                                    // Set a proper referrer to avoid VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER error
-                                    // Use app's package name as referrer
                                     setGeolocationEnabled(false)
+                                    // Enable mixed content (HTTP/HTTPS)
+                                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                    // Set user agent to include referrer information
+                                    userAgentString = "$userAgentString"
+                                    // Enable caching for better performance
+                                    cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                                }
+                                
+                                // Set custom WebViewClient to handle URL schemes and referrer
+                                webView?.webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(
+                                        view: WebView?,
+                                        request: WebResourceRequest?
+                                    ): Boolean {
+                                        val url = request?.url?.toString() ?: return false
+                                        
+                                        // Handle intent URLs (YouTube app links)
+                                        if (url.startsWith("intent://")) {
+                                            try {
+                                                val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                                                view?.context?.startActivity(intent)
+                                                return true
+                                            } catch (e: Exception) {
+                                                // Intent failed, let WebView handle it normally
+                                            }
+                                        }
+                                        
+                                        // Allow YouTube to load normally
+                                        return false
+                                    }
                                 }
 
                                 // Configure IFramePlayerOptions with proper origin and referrer
@@ -442,6 +472,7 @@ data class YouTubeError(
 
         private fun getUserFriendlyMessage(code: Int): String {
             return when (code) {
+                -1 -> "Playback error. Try refreshing or watch on YouTube directly"
                 2 -> "Invalid video parameter"
                 5 -> "This video cannot't be played in embedded player"
                 100 -> "Video not found. It may have been removed or is private"
