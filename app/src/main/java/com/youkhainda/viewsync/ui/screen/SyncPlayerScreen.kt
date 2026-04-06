@@ -346,14 +346,12 @@ private fun VideoPlayerCard(
                                     }
                                 }
 
-                                // Configure IFramePlayerOptions with proper origin and referrer
-                                // Use your app's package name as origin to match Google Cloud Console restrictions
-                                val packageName = ctx.packageName
+                                // Configure IFramePlayerOptions with proper origin
+                                // Use https://localhost as origin to avoid embedding restrictions
                                 val options = IFramePlayerOptions.Builder(ctx)
                                     .controls(1)
                                     .origin("https://localhost")
                                     .autoplay(0)
-                                    .referrer("https://www.youtube.com")
                                     .build()
 
                                 initialize(object : AbstractYouTubePlayerListener() {
