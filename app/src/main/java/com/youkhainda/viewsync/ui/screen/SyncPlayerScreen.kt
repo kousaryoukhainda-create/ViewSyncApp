@@ -308,8 +308,12 @@ private fun VideoPlayerCard(
                                     userAgentString = "$userAgentString"
                                     // Enable caching for better performance
                                     cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                                    // Enable database storage for WebView
+                                    databaseEnabled = true
+                                    // Enable DOM storage
+                                    domStorageEnabled = true
                                 }
-                                
+
                                 // Set custom WebViewClient to handle URL schemes and referrer
                                 webView?.webViewClient = object : WebViewClient() {
                                     override fun shouldOverrideUrlLoading(
@@ -317,7 +321,7 @@ private fun VideoPlayerCard(
                                         request: WebResourceRequest?
                                     ): Boolean {
                                         val url = request?.url?.toString() ?: return false
-                                        
+
                                         // Handle intent URLs (YouTube app links)
                                         if (url.startsWith("intent://")) {
                                             try {
@@ -328,18 +332,28 @@ private fun VideoPlayerCard(
                                                 // Intent failed, let WebView handle it normally
                                             }
                                         }
-                                        
+
                                         // Allow YouTube to load normally
                                         return false
+                                    }
+
+                                    override fun onPageFinished(view: WebView?, url: String?) {
+                                        super.onPageFinished(view, url)
+                                        // Inject referrer header after page loads
+                                        view?.loadUrl("javascript:(function() { " +
+                                            "document.referrer = 'https://www.youtube.com'; " +
+                                            "})()")
                                     }
                                 }
 
                                 // Configure IFramePlayerOptions with proper origin and referrer
-                                // Using https://www.youtube.com as origin resolves embedding issues
+                                // Use your app's package name as origin to match Google Cloud Console restrictions
+                                val packageName = ctx.packageName
                                 val options = IFramePlayerOptions.Builder(ctx)
                                     .controls(1)
-                                    .origin("https://www.youtube.com")
+                                    .origin("https://localhost")
                                     .autoplay(0)
+                                    .referrer("https://www.youtube.com")
                                     .build()
 
                                 initialize(object : AbstractYouTubePlayerListener() {
