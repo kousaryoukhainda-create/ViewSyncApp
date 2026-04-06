@@ -1,6 +1,9 @@
 package com.youkhainda.viewsync.ui.screen
 
+import android.content.Intent
+import android.net.Uri
 import android.view.ViewGroup
+import android.webkit.WebView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -233,11 +236,14 @@ private fun VideoPlayerCard(
     var currentTime by remember { mutableLongStateOf(0L) }
     var youtubePlayer by remember { mutableStateOf<YouTubePlayer?>(null) }
     var showCueDialog by remember { mutableStateOf(false) }
-    var playerError by remember { mutableStateOf<String?>(null) }
+    var playerError by remember { mutableStateOf<YouTubeError?>(null) }
     var isPlayerReady by remember { mutableStateOf(false) }
+    var retryCount by remember { mutableIntStateOf(0) }
+    var currentOrigin by remember { mutableStateOf("https://www.youtube-nocookie.com") }
 
     // Validate video ID before attempting to play
     val isValidVideoId = com.youkhainda.viewsync.data.remote.YouTubeUrlParser.isValidVideoId(videoId)
+    val context = LocalContext.current
 
     // Register/unregister player with controller
     DisposableEffect(videoIndex) {
@@ -263,16 +269,22 @@ private fun VideoPlayerCard(
                     // Error state - show error message with retry option
                     VideoPlayerErrorView(
                         error = playerError!!,
+                        videoId = videoId,
                         onRetry = {
                             playerError = null
                             isPlayerReady = false
                             youtubePlayer = null
+                            retryCount++
+                        },
+                        onWatchOnYouTube = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
+                            context.startActivity(intent)
                         },
                     )
                 } else {
                     AndroidView(
-                        factory = { context ->
-                            YouTubePlayerView(context).apply {
+                        factory = { ctx ->
+                            YouTubePlayerView(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     dpToPx(200),
@@ -281,20 +293,35 @@ private fun VideoPlayerCard(
                                 // Disable automatic initialization since we're initializing manually
                                 enableAutomaticInitialization = false
 
-                                // Configure WebView with proper referrer headers to fix Error 152
-                                val packageName = context.packageName
-                                val webView = this.getChildAt(0) as? android.webkit.WebView
+                                // Configure WebView with enhanced settings for video playback
+                                val webView = this.getChildAt(0) as? WebView
                                 webView?.settings?.apply {
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
-                                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
+                                    mediaPlaybackRequiresUserGesture = false
+                                    allowFileAccess = false
+                                    allowContentAccess = false
+                                    setSupportMultipleWindows(false)
+                                    // Use a desktop-like user agent to avoid mobile restrictions
+                                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
                                 }
 
-                                // Use IFramePlayerOptions with youtube-nocookie.com origin to fix Error 152-4
-                                val options = IFramePlayerOptions.Builder(context)
-                                    .controls(1)
-                                    .origin("https://www.youtube-nocookie.com")
-                                    .build()
+                                // Try different origin configurations based on retry count
+                                val options = if (retryCount < 2) {
+                                    // First attempt: use nocookie origin
+                                    IFramePlayerOptions.Builder(ctx)
+                                        .controls(1)
+                                        .origin(currentOrigin)
+                                        .autoplay(0)
+                                        .build()
+                                } else {
+                                    // Retry attempt: use regular youtube.com origin
+                                    IFramePlayerOptions.Builder(ctx)
+                                        .controls(1)
+                                        .origin("https://www.youtube.com")
+                                        .autoplay(0)
+                                        .build()
+                                }
 
                                 initialize(object : AbstractYouTubePlayerListener() {
                                     override fun onReady(player: YouTubePlayer) {
@@ -312,7 +339,9 @@ private fun VideoPlayerCard(
                                         youtubePlayer: YouTubePlayer,
                                         error: PlayerConstants.PlayerError,
                                     ) {
-                                        playerError = error.toString()
+                                        // Parse error code and provide user-friendly message
+                                        val youTubeError = parseYouTubeError(error)
+                                        playerError = youTubeError
                                         isPlayerReady = false
                                     }
 
@@ -398,15 +427,63 @@ private fun VideoPlayerCard(
     }
 }
 
+/**
+ * Represents a YouTube player error with user-friendly message
+ */
+data class YouTubeError(
+    val code: Int,
+    val rawError: PlayerConstants.PlayerError,
+    val userMessage: String,
+) {
+    companion object {
+        fun fromPlayerError(error: PlayerConstants.PlayerError): YouTubeError {
+            val errorString = error.toString()
+            val code = extractErrorCode(errorString)
+            val message = getUserFriendlyMessage(code)
+            return YouTubeError(code, error, message)
+        }
+
+        private fun extractErrorCode(errorString: String): Int {
+            // Try to extract error code from various formats
+            // "Error 100", "Error(100)", "100", etc.
+            val regex = Regex("""(\d{2,3})""")
+            val match = regex.find(errorString)
+            return match?.groupValues?.get(1)?.toIntOrNull() ?: -1
+        }
+
+        private fun getUserFriendlyMessage(code: Int): String {
+            return when (code) {
+                2 -> "Invalid video parameter"
+                5 -> "This video cannot't be played in embedded player"
+                100 -> "Video not found. It may have been removed or is private"
+                101, 150 -> "Video owner doesn't allow embedding"
+                152 -> "Video restricted due to domain or copyright settings"
+                else -> "This video is unavailable or can't be played"
+            }
+        }
+    }
+}
+
+/**
+ * Parse YouTube player error into user-friendly format
+ */
+fun parseYouTubeError(error: PlayerConstants.PlayerError): YouTubeError {
+    return YouTubeError.fromPlayerError(error)
+}
+
 @Composable
 private fun VideoPlayerErrorView(
-    error: String,
+    error: YouTubeError,
+    videoId: String,
     onRetry: () -> Unit,
+    onWatchOnYouTube: () -> Unit,
 ) {
+    val context = LocalContext.current
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
+            .height(240.dp)
             .background(MaterialTheme.colorScheme.errorContainer),
         contentAlignment = Alignment.Center,
     ) {
@@ -422,26 +499,56 @@ private fun VideoPlayerErrorView(
                 modifier = Modifier.size(40.dp),
             )
             Text(
-                text = "This video is unavailable",
+                text = error.userMessage,
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "Error: $error",
+                text = "Error code: ${error.code}",
                 color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Button(
-                onClick = onRetry,
+            Row(
                 modifier = Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Retry")
+                }
+                Button(
+                    onClick = onWatchOnYouTube,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                    ),
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Watch on YouTube")
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, "https://www.youtube.com/watch?v=$videoId")
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "Share video"))
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Retry")
+                Text("Generate Share Link")
             }
         }
     }
