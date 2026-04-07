@@ -819,6 +819,7 @@ private fun YouTubePlayerViewContainer(
             // CRITICAL: Properly release YouTubePlayerView to prevent surface leaks
             // This prevents "Max RTS IDs reached" errors on Vivo/BBK devices
             try {
+                view.removeYouTubePlayerListener()
                 view.release()
             } catch (e: Exception) {
                 // Ignore errors during cleanup

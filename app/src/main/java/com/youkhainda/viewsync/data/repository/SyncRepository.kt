@@ -1,5 +1,10 @@
 package com.youkhainda.viewsync.data.repository
 
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.data.model.SyncCue
 import com.youkhainda.viewsync.data.model.YouTubeVideo
@@ -7,9 +12,12 @@ import com.youkhainda.viewsync.data.remote.YouTubeApiService
 import com.youkhainda.viewsync.data.remote.YouTubeUrlParser
 import com.youkhainda.viewsync.data.remote.parseDuration
 import com.youkhainda.viewsync.BuildConfig
-import dagger.hilt.android.scopes.ViewModelScoped
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,10 +25,92 @@ import javax.inject.Singleton
 @Singleton
 class SyncRepository @Inject constructor(
     private val youtubeApi: YouTubeApiService,
+    private val dataStore: DataStore<Preferences>,
+    private val json: Json,
+    @ApplicationContext private val context: Context,
 ) {
 
-    // In-memory storage (can be replaced with Room DB for persistence)
+    // In-memory cache for fast access
     private val syncSessions = mutableMapOf<String, SyncSession>()
+    
+    // Track the last active session ID for restoration
+    private var lastActiveSessionId: String? = null
+
+    // DataStore keys
+    private val SESSIONS_KEY = stringPreferencesKey("sync_sessions")
+    private val LAST_ACTIVE_SESSION_KEY = stringPreferencesKey("last_active_session_id")
+
+    /**
+     * Initializes the repository by loading sessions from persistent storage
+     */
+    suspend fun initialize() = withContext(Dispatchers.IO) {
+        try {
+            val preferences = dataStore.data.first()
+            
+            // Load sessions
+            val sessionsJson = preferences[SESSIONS_KEY]
+            if (sessionsJson != null) {
+                val sessionsList = json.decodeFromString<List<SyncSession>>(sessionsJson)
+                syncSessions.clear()
+                sessionsList.forEach { session ->
+                    syncSessions[session.id] = session
+                }
+            }
+            
+            // Load last active session
+            lastActiveSessionId = preferences[LAST_ACTIVE_SESSION_KEY]
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Persists all sessions to DataStore
+     */
+    private suspend fun persistSessions() = withContext(Dispatchers.IO) {
+        try {
+            val sessionsList = syncSessions.values.toList()
+            val sessionsJson = json.encodeToString(sessionsList)
+            dataStore.edit { preferences ->
+                preferences[SESSIONS_KEY] = sessionsJson
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Persists the last active session ID for restoration
+     */
+    suspend fun saveLastActiveSession(sessionId: String) = withContext(Dispatchers.IO) {
+        try {
+            lastActiveSessionId = sessionId
+            dataStore.edit { preferences ->
+                preferences[LAST_ACTIVE_SESSION_KEY] = sessionId
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Returns the last active session ID, if any
+     */
+    fun getLastActiveSessionId(): String? = lastActiveSessionId
+
+    /**
+     * Clears the last active session ID
+     */
+    suspend fun clearLastActiveSession() = withContext(Dispatchers.IO) {
+        try {
+            lastActiveSessionId = null
+            dataStore.edit { preferences ->
+                preferences.remove(LAST_ACTIVE_SESSION_KEY)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     /**
      * Searches for YouTube videos or handles direct YouTube URLs.
