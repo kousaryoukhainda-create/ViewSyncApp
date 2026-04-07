@@ -32,6 +32,7 @@ import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFram
 import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerUiState
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerViewModel
+import com.youkhainda.viewsync.util.CacheClearingUtil
 import com.youkhainda.viewsync.util.DebugLogger
 
 /**
@@ -406,13 +407,14 @@ data class YouTubeError(
     val code: Int,
     val rawError: PlayerConstants.PlayerError,
     val userMessage: String,
+    val isEmbeddingRestricted: Boolean = false,
 ) {
     companion object {
         fun fromPlayerError(error: PlayerConstants.PlayerError): YouTubeError {
             val errorString = error.toString()
             val code = extractErrorCode(errorString)
-            val message = getUserFriendlyMessage(code)
-            return YouTubeError(code, error, message)
+            val (message, isRestricted) = getUserFriendlyMessage(code, error)
+            return YouTubeError(code, error, message, isRestricted)
         }
 
         private fun extractErrorCode(errorString: String): Int {
@@ -423,15 +425,15 @@ data class YouTubeError(
             return match?.groupValues?.get(1)?.toIntOrNull() ?: -1
         }
 
-        private fun getUserFriendlyMessage(code: Int): String {
+        private fun getUserFriendlyMessage(code: Int, error: PlayerConstants.PlayerError): Pair<String, Boolean> {
             return when (code) {
-                -1 -> "Playback error. Try refreshing or watch on YouTube directly"
-                2 -> "Invalid video parameter"
-                5 -> "This video cannot't be played in embedded player"
-                100 -> "Video not found. It may have been removed or is private"
-                101, 150 -> "Video owner doesn't allow embedding"
-                152 -> "Video restricted due to domain or copyright settings"
-                else -> "This video is unavailable or can't be played"
+                -1 -> Pair("This video cannot be played in the embedded player.\nThe video owner may have disabled embedding.", true)
+                2 -> Pair("Invalid video parameter", false)
+                5 -> Pair("This video cannot be played in embedded player.\nThe owner has restricted embedding.", true)
+                100 -> Pair("Video not found. It may have been removed or is private", false)
+                101, 150 -> Pair("Video owner doesn't allow embedding.\nPlease watch on YouTube directly.", true)
+                152 -> Pair("Video restricted due to domain or copyright settings", true)
+                else -> Pair("This video is unavailable or can't be played", false)
             }
         }
     }
@@ -456,7 +458,7 @@ private fun VideoPlayerErrorView(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(240.dp)
+            .height(280.dp)
             .background(MaterialTheme.colorScheme.errorContainer),
         contentAlignment = Alignment.Center,
     ) {
@@ -466,7 +468,7 @@ private fun VideoPlayerErrorView(
             modifier = Modifier.padding(16.dp),
         ) {
             Icon(
-                imageVector = Icons.Default.Error,
+                imageVector = if (error.isEmbeddingRestricted) Icons.Default.OpenInNew else Icons.Default.Error,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.size(40.dp),
@@ -475,7 +477,7 @@ private fun VideoPlayerErrorView(
                 text = error.userMessage,
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
@@ -489,17 +491,20 @@ private fun VideoPlayerErrorView(
                 modifier = Modifier.padding(top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Button(
-                    onClick = onRetry,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
+                // Only show retry button if not embedding-restricted
+                if (!error.isEmbeddingRestricted) {
+                    Button(
+                        onClick = onRetry,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Retry")
+                    }
                 }
                 Button(
                     onClick = onWatchOnYouTube,
-                    modifier = Modifier.weight(1f),
+                    modifier = if (error.isEmbeddingRestricted) Modifier.fillMaxWidth() else Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.secondary,
                     ),
@@ -509,19 +514,35 @@ private fun VideoPlayerErrorView(
                     Text("Watch on YouTube")
                 }
             }
-            OutlinedButton(
-                onClick = {
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, "https://www.youtube.com/watch?v=$videoId")
-                    }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share video"))
-                },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Generate Share Link")
+                OutlinedButton(
+                    onClick = {
+                        CacheClearingUtil.clearAppCache(context)
+                        onRetry()
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Clear Cache & Retry")
+                }
+                OutlinedButton(
+                    onClick = {
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "https://www.youtube.com/watch?v=$videoId")
+                        }
+                        context.startActivity(Intent.createChooser(shareIntent, "Share video"))
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Share")
+                }
             }
         }
     }
@@ -824,15 +845,14 @@ private fun YouTubePlayerViewContainer(
                     }
                 }
 
-                // Configure IFramePlayerOptions
-                // Note: origin() is intentionally omitted - YouTube's embedded player rejects
-                // untrusted origins like "localhost". Without origin, YouTube validates based on
-                // the IFrame API context rather than HTTP referrer.
+                // Configure IFramePlayerOptions with origin for better embedding compatibility
+                // Setting origin to youtube.com helps avoid embedding restrictions
                 val options = IFramePlayerOptions.Builder(ctx)
                     .controls(1)
                     .autoplay(0)
+                    .origin("https://www.youtube.com")
                     .build()
-                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: IFramePlayerOptions configured")
+                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: IFramePlayerOptions configured with origin")
 
                 val listener = object : AbstractYouTubePlayerListener() {
                     override fun onReady(player: YouTubePlayer) {
