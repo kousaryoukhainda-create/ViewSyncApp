@@ -309,7 +309,7 @@ class SyncRepository @Inject constructor(
             append("&name=${session.name}")
         }
         DebugLogger.d("SyncRepository", "Share link generated: $link")
-        link
+        return link
     }
 
     // Calculate offset between videos based on sync cues

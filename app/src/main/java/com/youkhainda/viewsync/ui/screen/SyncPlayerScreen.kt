@@ -291,11 +291,12 @@ private fun VideoPlayerCard(
         Column {
             // YouTube Player
             if (isValidVideoId) {
-                if (playerError != null) {
+                val currentError = playerError
+                if (currentError != null) {
                     // Error state - show error message with retry option
-                    DebugLogger.w("VideoPlayerCard", "Video $videoIndex: Showing error view - ${playerError.userMessage}")
+                    DebugLogger.w("VideoPlayerCard", "Video $videoIndex: Showing error view - ${currentError.userMessage}")
                     VideoPlayerErrorView(
-                        error = playerError!!,
+                        error = currentError,
                         videoId = videoId,
                         onRetry = {
                             DebugLogger.i("VideoPlayerCard", "Video $videoIndex: User clicked retry")
@@ -747,6 +748,7 @@ private fun YouTubePlayerViewContainer(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var listenerRef = mutableListOf<AbstractYouTubePlayerListener>()
 
     DebugLogger.i("YouTubePlayerView", "Video $videoIndex: Initializing player - ID: $videoId, Offset: ${offset}ms (${offset / 1000f}s)")
 
@@ -831,7 +833,7 @@ private fun YouTubePlayerViewContainer(
                     .build()
                 DebugLogger.d("YouTubePlayerView", "Video $videoIndex: IFramePlayerOptions configured")
 
-                initialize(object : AbstractYouTubePlayerListener() {
+                val listener = object : AbstractYouTubePlayerListener() {
                     override fun onReady(player: YouTubePlayer) {
                         DebugLogger.i("YouTubePlayerListener", "Video $videoIndex: onReady callback triggered")
                         onPlayerReady(player)
@@ -857,7 +859,9 @@ private fun YouTubePlayerViewContainer(
                     ) {
                         DebugLogger.d("YouTubePlayerListener", "Video $videoIndex: State changed to ${state.name}")
                     }
-                }, options)
+                }
+                listenerRef.add(listener)
+                initialize(listener, options)
                 DebugLogger.i("YouTubePlayerView", "Video $videoIndex: Player initialized with listener")
             }
         },
@@ -866,7 +870,9 @@ private fun YouTubePlayerViewContainer(
             // This prevents "Max RTS IDs reached" errors on Vivo/BBK devices
             DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Releasing player view")
             try {
-                view.removeYouTubePlayerListener()
+                listenerRef.firstOrNull()?.let { listener ->
+                    view.removeYouTubePlayerListener(listener)
+                }
                 view.release()
                 DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Player view released successfully")
             } catch (e: Exception) {
