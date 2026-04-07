@@ -8,6 +8,7 @@ import com.youkhainda.viewsync.data.model.SyncState
 import com.youkhainda.viewsync.data.model.YouTubeVideo
 import com.youkhainda.viewsync.data.remote.YouTubeUrlParser
 import com.youkhainda.viewsync.data.repository.SyncRepository
+import com.youkhainda.viewsync.util.DebugLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,38 +33,49 @@ class SyncPlayerViewModel @Inject constructor(
     private var currentSessionId: String? = null
 
     fun loadSyncSession(sessionId: String) {
+        DebugLogger.step("SyncPlayerVM", "loadSyncSession", 1, 3)
         viewModelScope.launch {
             _uiState.value = SyncPlayerUiState.Loading
 
             try {
+                DebugLogger.step("SyncPlayerVM", "Fetching session from repository", 2, 3)
                 val session = repository.getSyncSession(sessionId)
                 if (session != null) {
                     currentSessionId = sessionId
+                    DebugLogger.step("SyncPlayerVM", "Calculating video offsets", 3, 3)
                     val offsets = repository.calculateVideoOffsets(sessionId)
                     _videoOffsets.value = offsets
+                    DebugLogger.stepSuccess("SyncPlayerVM", "Session loaded successfully", 
+                        "Videos: ${session.videoIds.size}, Cues: ${session.syncCues.size}")
                     _uiState.value = SyncPlayerUiState.Success(session)
                 } else {
+                    DebugLogger.stepFailed("SyncPlayerVM", "Session not found", "Session ID: $sessionId")
                     _uiState.value = SyncPlayerUiState.Error("Session not found")
                 }
             } catch (e: Exception) {
+                DebugLogger.stepFailed("SyncPlayerVM", "loadSyncSession", e.message ?: "Unknown error", e)
                 _uiState.value = SyncPlayerUiState.Error(e.message ?: "Unknown error")
             }
         }
     }
 
     fun play() {
+        DebugLogger.i("SyncPlayerVM", "play() called")
         _syncState.value = _syncState.value.copy(isPlaying = true)
     }
 
     fun pause() {
+        DebugLogger.i("SyncPlayerVM", "pause() called")
         _syncState.value = _syncState.value.copy(isPlaying = false)
     }
 
     fun seekToPosition(positionMs: Long) {
+        DebugLogger.d("SyncPlayerVM", "seekToPosition() called - position: ${positionMs}ms")
         _syncState.value = _syncState.value.copy(currentPlayPosition = positionMs)
     }
 
     fun recordSyncCue(videoIndex: Int, cueTimeMs: Long, description: String = "") {
+        DebugLogger.i("SyncPlayerVM", "recordSyncCue() - Video: $videoIndex, Time: ${cueTimeMs}ms, Desc: $description")
         viewModelScope.launch {
             val sessionId = currentSessionId ?: return@launch
             val cue = SyncCue(
@@ -72,10 +84,12 @@ class SyncPlayerViewModel @Inject constructor(
                 description = description,
             )
             repository.addSyncCue(sessionId, cue)
-            
+            DebugLogger.d("SyncPlayerVM", "Sync cue added to repository")
+
             // Recalculate offsets
             val offsets = repository.calculateVideoOffsets(sessionId)
             _videoOffsets.value = offsets
+            DebugLogger.d("SyncPlayerVM", "Offsets recalculated: $offsets")
 
             // Refresh session
             val session = repository.getSyncSession(sessionId)
@@ -86,10 +100,11 @@ class SyncPlayerViewModel @Inject constructor(
     }
 
     fun removeSyncCue(cueIndex: Int) {
+        DebugLogger.i("SyncPlayerVM", "removeSyncCue() - Index: $cueIndex")
         viewModelScope.launch {
             val sessionId = currentSessionId ?: return@launch
             repository.removeSyncCue(sessionId, cueIndex)
-            
+
             // Recalculate offsets
             val offsets = repository.calculateVideoOffsets(sessionId)
             _videoOffsets.value = offsets
@@ -103,9 +118,11 @@ class SyncPlayerViewModel @Inject constructor(
     }
 
     fun generateShareLink() {
+        DebugLogger.i("SyncPlayerVM", "generateShareLink() called")
         viewModelScope.launch {
             val sessionId = currentSessionId ?: return@launch
             val link = repository.generateShareLink(sessionId)
+            DebugLogger.d("SyncPlayerVM", "Share link generated: $link")
             val currentState = _uiState.value
             _uiState.value = when (currentState) {
                 is SyncPlayerUiState.Success -> currentState.copy(shareLink = link)
@@ -115,6 +132,7 @@ class SyncPlayerViewModel @Inject constructor(
     }
 
     fun addVideosToSession(sessionId: String, videos: List<YouTubeVideo>) {
+        DebugLogger.i("SyncPlayerVM", "addVideosToSession() - Session: $sessionId, Videos: ${videos.size}")
         viewModelScope.launch {
             val updatedSession = repository.addVideosToSession(sessionId, videos)
             if (updatedSession != null) {
@@ -123,6 +141,7 @@ class SyncPlayerViewModel @Inject constructor(
                     val offsets = repository.calculateVideoOffsets(sessionId)
                     _videoOffsets.value = offsets
                     _uiState.value = SyncPlayerUiState.Success(updatedSession)
+                    DebugLogger.i("SyncPlayerVM", "Videos added successfully - Total videos: ${updatedSession.videoIds.size}")
                 }
             }
         }

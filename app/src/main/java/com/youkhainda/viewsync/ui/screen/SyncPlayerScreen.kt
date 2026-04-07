@@ -32,6 +32,7 @@ import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFram
 import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerUiState
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerViewModel
+import com.youkhainda.viewsync.util.DebugLogger
 
 /**
  * Interface to control YouTube players across all video cards
@@ -53,8 +54,10 @@ fun SyncPlayerScreen(
     val uiState by viewModel.uiState.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
     val videoOffsets by viewModel.videoOffsets.collectAsState()
+    var showDebugOverlay by remember { mutableStateOf(false) }
 
     LaunchedEffect(sessionId) {
+        DebugLogger.i("SyncPlayerScreen", "Loading session: $sessionId")
         viewModel.loadSyncSession(sessionId)
     }
 
@@ -65,12 +68,14 @@ fun SyncPlayerScreen(
     ) {
         when (val state = uiState) {
             is SyncPlayerUiState.Loading -> {
+                DebugLogger.d("SyncPlayerScreen", "UI State: Loading")
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
 
             is SyncPlayerUiState.Success -> {
+                DebugLogger.i("SyncPlayerScreen", "UI State: Success - Session: ${state.session.name}, Videos: ${state.session.videoIds.size}, Sync Cues: ${state.session.syncCues.size}")
                 SyncPlayerContent(
                     session = state.session,
                     shareLink = state.shareLink,
@@ -86,10 +91,26 @@ fun SyncPlayerScreen(
             }
 
             is SyncPlayerUiState.Error -> {
+                DebugLogger.e("SyncPlayerScreen", "UI State: Error - ${state.message}")
                 ErrorScreen(message = state.message)
             }
         }
+        
+        // Debug toggle button in bottom-right corner
+        DebugToggleButton(
+            isVisible = showDebugOverlay,
+            onToggle = { showDebugOverlay = !showDebugOverlay },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+        )
     }
+    
+    // Debug overlay dialog
+    DebugOverlay(
+        isVisible = showDebugOverlay,
+        onDismiss = { showDebugOverlay = false },
+    )
 }
 
 @Composable
@@ -246,15 +267,19 @@ private fun VideoPlayerCard(
     val isValidVideoId = com.youkhainda.viewsync.data.remote.YouTubeUrlParser.isValidVideoId(videoId)
     val context = LocalContext.current
 
+    DebugLogger.d("VideoPlayerCard", "Video $videoIndex: ID=$videoId, Offset=$offset ms, Valid=$isValidVideoId")
+
     // Register/unregister player with controller
     DisposableEffect(videoIndex) {
         if (isValidVideoId && isPlayerReady) {
             youtubePlayer?.let { player ->
                 playerController.registerPlayer(videoIndex, player)
+                DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Registered with controller")
             }
         }
         onDispose {
             playerController.unregisterPlayer(videoIndex)
+            DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Unregistered from controller")
         }
     }
 
@@ -268,20 +293,24 @@ private fun VideoPlayerCard(
             if (isValidVideoId) {
                 if (playerError != null) {
                     // Error state - show error message with retry option
+                    DebugLogger.w("VideoPlayerCard", "Video $videoIndex: Showing error view - ${playerError.userMessage}")
                     VideoPlayerErrorView(
                         error = playerError!!,
                         videoId = videoId,
                         onRetry = {
+                            DebugLogger.i("VideoPlayerCard", "Video $videoIndex: User clicked retry")
                             playerError = null
                             isPlayerReady = false
                             youtubePlayer = null
                         },
                         onWatchOnYouTube = {
+                            DebugLogger.i("VideoPlayerCard", "Video $videoIndex: User clicked Watch on YouTube")
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
                             context.startActivity(intent)
                         },
                     )
                 } else {
+                    DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Creating YouTubePlayerView")
                     YouTubePlayerViewContainer(
                         videoId = videoId,
                         videoIndex = videoIndex,
@@ -290,11 +319,13 @@ private fun VideoPlayerCard(
                             youtubePlayer = player
                             isPlayerReady = true
                             playerController.registerPlayer(videoIndex, player)
+                            DebugLogger.i("VideoPlayerCard", "Video $videoIndex: Player ready, registered with controller")
                         },
                         onError = { error ->
                             val youTubeError = parseYouTubeError(error)
                             playerError = youTubeError
                             isPlayerReady = false
+                            DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Player error - Code: ${youTubeError.code}, Message: ${youTubeError.userMessage}")
                         },
                         onCurrentSecond = { second ->
                             currentTime = (second * 1000).toLong()
@@ -303,6 +334,7 @@ private fun VideoPlayerCard(
                 }
             } else {
                 // Invalid video ID - show error placeholder
+                DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Invalid video ID format: $videoId")
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -716,8 +748,11 @@ private fun YouTubePlayerViewContainer(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    DebugLogger.i("YouTubePlayerView", "Video $videoIndex: Initializing player - ID: $videoId, Offset: ${offset}ms (${offset / 1000f}s)")
+
     AndroidView(
         factory = { ctx ->
+            DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Creating YouTubePlayerView instance")
             YouTubePlayerView(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -726,9 +761,11 @@ private fun YouTubePlayerViewContainer(
 
                 // Disable automatic initialization since we're initializing manually
                 enableAutomaticInitialization = false
+                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Automatic initialization disabled")
 
                 // Configure WebView with enhanced settings for video playback
                 val webView = this.getChildAt(0) as? WebView
+                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: WebView found: ${webView != null}")
                 webView?.settings?.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
@@ -747,6 +784,7 @@ private fun YouTubePlayerViewContainer(
                     databaseEnabled = true
                     // Enable DOM storage
                     domStorageEnabled = true
+                    DebugLogger.d("YouTubePlayerView", "Video $videoIndex: WebView settings configured")
                 }
 
                 // Set custom WebViewClient to handle URL schemes and referrer
@@ -762,8 +800,10 @@ private fun YouTubePlayerViewContainer(
                             try {
                                 val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
                                 view?.context?.startActivity(intent)
+                                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Intent URL handled")
                                 return true
                             } catch (e: Exception) {
+                                DebugLogger.w("YouTubePlayerView", "Video $videoIndex: Intent handling failed: ${e.message}")
                                 // Intent failed, let WebView handle it normally
                             }
                         }
@@ -774,6 +814,7 @@ private fun YouTubePlayerViewContainer(
 
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
+                        DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Page finished loading: $url")
                         // Inject referrer header after page loads
                         view?.loadUrl("javascript:(function() { " +
                             "document.referrer = 'https://www.youtube.com'; " +
@@ -788,10 +829,13 @@ private fun YouTubePlayerViewContainer(
                     .origin("https://localhost")
                     .autoplay(0)
                     .build()
+                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: IFramePlayerOptions configured")
 
                 initialize(object : AbstractYouTubePlayerListener() {
                     override fun onReady(player: YouTubePlayer) {
+                        DebugLogger.i("YouTubePlayerListener", "Video $videoIndex: onReady callback triggered")
                         onPlayerReady(player)
+                        DebugLogger.i("YouTubePlayerListener", "Video $videoIndex: Cueing video at ${offset / 1000f}s")
                         player.cueVideo(videoId, offset / 1000f)
                     }
 
@@ -803,6 +847,7 @@ private fun YouTubePlayerViewContainer(
                         youtubePlayer: YouTubePlayer,
                         error: PlayerConstants.PlayerError,
                     ) {
+                        DebugLogger.e("YouTubePlayerListener", "Video $videoIndex: onError callback - ${error.name}")
                         onError(error)
                     }
 
@@ -810,19 +855,22 @@ private fun YouTubePlayerViewContainer(
                         youtubePlayer: YouTubePlayer,
                         state: PlayerConstants.PlayerState,
                     ) {
-                        // Handle state changes if needed
+                        DebugLogger.d("YouTubePlayerListener", "Video $videoIndex: State changed to ${state.name}")
                     }
                 }, options)
+                DebugLogger.i("YouTubePlayerView", "Video $videoIndex: Player initialized with listener")
             }
         },
         onRelease = { view ->
             // CRITICAL: Properly release YouTubePlayerView to prevent surface leaks
             // This prevents "Max RTS IDs reached" errors on Vivo/BBK devices
+            DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Releasing player view")
             try {
                 view.removeYouTubePlayerListener()
                 view.release()
+                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Player view released successfully")
             } catch (e: Exception) {
-                // Ignore errors during cleanup
+                DebugLogger.w("YouTubePlayerView", "Video $videoIndex: Error during release: ${e.message}")
             }
         },
         modifier = Modifier
@@ -846,30 +894,34 @@ class PlayerControllerImpl : PlayerController {
     private val players = mutableMapOf<Int, YouTubePlayer>()
 
     override fun playAll() {
+        DebugLogger.i("PlayerController", "playAll() called - ${players.size} players registered")
         players.values.forEach { player ->
             player.play()
         }
     }
 
     override fun pauseAll() {
+        DebugLogger.i("PlayerController", "pauseAll() called - ${players.size} players registered")
         players.values.forEach { player ->
             player.pause()
         }
     }
 
     override fun seekAll(positionMs: Long) {
+        DebugLogger.i("PlayerController", "seekAll() called - position: ${positionMs}ms, ${players.size} players")
         players.forEach { (index, player) ->
-            // Each player seeks to position + its offset
-            // Offsets are already applied when cueing the video
+            DebugLogger.d("PlayerController", "Seeking player $index to ${positionMs}ms")
             player.seekTo(positionMs / 1000f)
         }
     }
 
     override fun registerPlayer(index: Int, player: YouTubePlayer) {
         players[index] = player
+        DebugLogger.d("PlayerController", "Player registered at index $index - Total: ${players.size}")
     }
 
     override fun unregisterPlayer(index: Int) {
         players.remove(index)
+        DebugLogger.d("PlayerController", "Player unregistered at index $index - Total: ${players.size}")
     }
 }
