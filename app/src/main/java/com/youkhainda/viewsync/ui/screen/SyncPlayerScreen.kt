@@ -4,8 +4,10 @@ import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -24,11 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFramePlayerOptions
 import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerUiState
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerViewModel
@@ -42,7 +39,7 @@ interface PlayerController {
     fun playAll()
     fun pauseAll()
     fun seekAll(positionMs: Long)
-    fun registerPlayer(index: Int, player: YouTubePlayer)
+    fun registerPlayer(index: Int, player: WebView)
     fun unregisterPlayer(index: Int)
 }
 
@@ -259,9 +256,8 @@ private fun VideoPlayerCard(
     onRecordCue: (Long, String) -> Unit,
 ) {
     var currentTime by remember { mutableLongStateOf(0L) }
-    var youtubePlayer by remember { mutableStateOf<YouTubePlayer?>(null) }
+    var webView by remember { mutableStateOf<WebView?>(null) }
     var showCueDialog by remember { mutableStateOf(false) }
-    var playerError by remember { mutableStateOf<YouTubeError?>(null) }
     var isPlayerReady by remember { mutableStateOf(false) }
 
     // Validate video ID before attempting to play
@@ -273,7 +269,7 @@ private fun VideoPlayerCard(
     // Register/unregister player with controller
     DisposableEffect(videoIndex) {
         if (isValidVideoId && isPlayerReady) {
-            youtubePlayer?.let { player ->
+            webView?.let { player ->
                 playerController.registerPlayer(videoIndex, player)
                 DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Registered with controller")
             }
@@ -290,50 +286,25 @@ private fun VideoPlayerCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Column {
-            // YouTube Player
+            // YouTube Player - Direct WebView
             if (isValidVideoId) {
-                val currentError = playerError
-                if (currentError != null) {
-                    // Error state - show error message with retry option
-                    DebugLogger.w("VideoPlayerCard", "Video $videoIndex: Showing error view - ${currentError.userMessage}")
-                    VideoPlayerErrorView(
-                        error = currentError,
-                        videoId = videoId,
-                        onRetry = {
-                            DebugLogger.i("VideoPlayerCard", "Video $videoIndex: User clicked retry")
-                            playerError = null
-                            isPlayerReady = false
-                            youtubePlayer = null
-                        },
-                        onWatchOnYouTube = {
-                            DebugLogger.i("VideoPlayerCard", "Video $videoIndex: User clicked Watch on YouTube")
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
-                            context.startActivity(intent)
-                        },
-                    )
-                } else {
-                    DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Creating YouTubePlayerView")
-                    YouTubePlayerViewContainer(
-                        videoId = videoId,
-                        videoIndex = videoIndex,
-                        offset = offset,
-                        onPlayerReady = { player ->
-                            youtubePlayer = player
-                            isPlayerReady = true
-                            playerController.registerPlayer(videoIndex, player)
-                            DebugLogger.i("VideoPlayerCard", "Video $videoIndex: Player ready, registered with controller")
-                        },
-                        onError = { error ->
-                            val youTubeError = parseYouTubeError(error)
-                            playerError = youTubeError
-                            isPlayerReady = false
-                            DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Player error - Code: ${youTubeError.code}, Message: ${youTubeError.userMessage}")
-                        },
-                        onCurrentSecond = { second ->
-                            currentTime = (second * 1000).toLong()
-                        },
-                    )
-                }
+                DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Creating WebView for direct YouTube playback")
+                DirectYouTubeWebView(
+                    videoId = videoId,
+                    offset = offset,
+                    onWebViewReady = { view ->
+                        webView = view
+                        isPlayerReady = true
+                        playerController.registerPlayer(videoIndex, view)
+                        DebugLogger.i("VideoPlayerCard", "Video $videoIndex: WebView ready, registered with controller")
+                    },
+                    onCurrentSecond = { second ->
+                        currentTime = (second * 1000).toLong()
+                    },
+                    onError = {
+                        DebugLogger.e("VideoPlayerCard", "Video $videoIndex: WebView error loading video")
+                    },
+                )
             } else {
                 // Invalid video ID - show error placeholder
                 DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Invalid video ID format: $videoId")
@@ -397,154 +368,6 @@ private fun VideoPlayerCard(
                 showCueDialog = false
             },
         )
-    }
-}
-
-/**
- * Represents a YouTube player error with user-friendly message
- */
-data class YouTubeError(
-    val code: Int,
-    val rawError: PlayerConstants.PlayerError,
-    val userMessage: String,
-    val isEmbeddingRestricted: Boolean = false,
-) {
-    companion object {
-        fun fromPlayerError(error: PlayerConstants.PlayerError): YouTubeError {
-            val errorString = error.toString()
-            val code = extractErrorCode(errorString)
-            val (message, isRestricted) = getUserFriendlyMessage(code, error)
-            return YouTubeError(code, error, message, isRestricted)
-        }
-
-        private fun extractErrorCode(errorString: String): Int {
-            // Try to extract error code from various formats
-            // "Error 100", "Error(100)", "100", etc.
-            val regex = Regex("""(\d{2,3})""")
-            val match = regex.find(errorString)
-            return match?.groupValues?.get(1)?.toIntOrNull() ?: -1
-        }
-
-        private fun getUserFriendlyMessage(code: Int, error: PlayerConstants.PlayerError): Pair<String, Boolean> {
-            return when (code) {
-                -1 -> Pair("This video cannot be played in the embedded player.\nThe video owner may have disabled embedding.", true)
-                2 -> Pair("Invalid video parameter", false)
-                5 -> Pair("This video cannot be played in embedded player.\nThe owner has restricted embedding.", true)
-                100 -> Pair("Video not found. It may have been removed or is private", false)
-                101, 150 -> Pair("Video owner doesn't allow embedding.\nPlease watch on YouTube directly.", true)
-                152 -> Pair("Video restricted due to domain or copyright settings", true)
-                else -> Pair("This video is unavailable or can't be played", false)
-            }
-        }
-    }
-}
-
-/**
- * Parse YouTube player error into user-friendly format
- */
-fun parseYouTubeError(error: PlayerConstants.PlayerError): YouTubeError {
-    return YouTubeError.fromPlayerError(error)
-}
-
-@Composable
-private fun VideoPlayerErrorView(
-    error: YouTubeError,
-    videoId: String,
-    onRetry: () -> Unit,
-    onWatchOnYouTube: () -> Unit,
-) {
-    val context = LocalContext.current
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(280.dp)
-            .background(MaterialTheme.colorScheme.errorContainer),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(16.dp),
-        ) {
-            Icon(
-                imageVector = if (error.isEmbeddingRestricted) Icons.Default.OpenInNew else Icons.Default.Error,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.size(40.dp),
-            )
-            Text(
-                text = error.userMessage,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "Error code: ${error.code}",
-                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(
-                modifier = Modifier.padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Only show retry button if not embedding-restricted
-                if (!error.isEmbeddingRestricted) {
-                    Button(
-                        onClick = onRetry,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Retry")
-                    }
-                }
-                Button(
-                    onClick = onWatchOnYouTube,
-                    modifier = if (error.isEmbeddingRestricted) Modifier.fillMaxWidth() else Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                    ),
-                ) {
-                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Watch on YouTube")
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        CacheClearingUtil.clearAppCache(context)
-                        onRetry()
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Clear Cache & Retry")
-                }
-                OutlinedButton(
-                    onClick = {
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, "https://www.youtube.com/watch?v=$videoId")
-                        }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share video"))
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Share")
-                }
-            }
-        }
     }
 }
 
@@ -753,43 +576,34 @@ private fun dpToPx(dp: Int): Int {
 }
 
 /**
- * YouTubePlayerViewContainer - Custom AndroidView with proper lifecycle management
+ * DirectYouTubeWebView - WebView that loads YouTube videos directly to bypass embedding restrictions
  * 
- * This component properly initializes and releases YouTubePlayerView to prevent
- * surface leaks that cause "Max RTS IDs reached" errors on Vivo/BBK devices.
+ * This loads the full YouTube watch page instead of using the embed player,
+ * which avoids embedding restrictions set by video owners.
  */
 @Composable
-private fun YouTubePlayerViewContainer(
+private fun DirectYouTubeWebView(
     videoId: String,
-    videoIndex: Int,
     offset: Long,
-    onPlayerReady: (YouTubePlayer) -> Unit,
-    onError: (PlayerConstants.PlayerError) -> Unit,
+    onWebViewReady: (WebView) -> Unit,
     onCurrentSecond: (Float) -> Unit,
+    onError: () -> Unit,
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var listenerRef = mutableListOf<AbstractYouTubePlayerListener>()
-
-    DebugLogger.i("YouTubePlayerView", "Video $videoIndex: Initializing player - ID: $videoId, Offset: ${offset}ms (${offset / 1000f}s)")
-
+    
+    DebugLogger.i("DirectYouTubeWebView", "Video: Initializing - ID: $videoId, Offset: ${offset}ms")
+    
     AndroidView(
         factory = { ctx ->
-            DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Creating YouTubePlayerView instance")
-            YouTubePlayerView(ctx).apply {
+            DebugLogger.d("DirectYouTubeWebView", "Video: Creating WebView instance")
+            WebView(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     dpToPx(200),
                 )
-
-                // Disable automatic initialization since we're initializing manually
-                enableAutomaticInitialization = false
-                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Automatic initialization disabled")
-
-                // Configure WebView with enhanced settings for video playback
-                val webView = this.getChildAt(0) as? WebView
-                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: WebView found: ${webView != null}")
-                webView?.settings?.apply {
+                
+                // Configure WebView settings for video playback
+                settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
                     mediaPlaybackRequiresUserGesture = false
@@ -797,107 +611,49 @@ private fun YouTubePlayerViewContainer(
                     allowContentAccess = false
                     setSupportMultipleWindows(false)
                     setGeolocationEnabled(false)
-                    // Enable mixed content (HTTP/HTTPS)
-                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    // Set user agent to include referrer information
-                    userAgentString = "$userAgentString"
-                    // Enable caching for better performance
-                    cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                    // Enable database storage for WebView
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    cacheMode = WebSettings.LOAD_DEFAULT
                     databaseEnabled = true
-                    // Enable DOM storage
-                    domStorageEnabled = true
-                    DebugLogger.d("YouTubePlayerView", "Video $videoIndex: WebView settings configured")
+                    useWideViewPort = true
+                    loadWithOverviewMode = true
+                    DebugLogger.d("DirectYouTubeWebView", "Video: WebView settings configured")
                 }
-
-                // Set custom WebViewClient to handle URL schemes and referrer
-                webView?.webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(
-                        view: WebView?,
-                        request: WebResourceRequest?
-                    ): Boolean {
-                        val url = request?.url?.toString() ?: return false
-
-                        // Handle intent URLs (YouTube app links)
-                        if (url.startsWith("intent://")) {
-                            try {
-                                val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
-                                view?.context?.startActivity(intent)
-                                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Intent URL handled")
-                                return true
-                            } catch (e: Exception) {
-                                DebugLogger.w("YouTubePlayerView", "Video $videoIndex: Intent handling failed: ${e.message}")
-                                // Intent failed, let WebView handle it normally
-                            }
-                        }
-
-                        // Allow YouTube to load normally
-                        return false
-                    }
-
+                
+                // Set WebViewClient to handle page loading
+                webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-                        DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Page finished loading: $url")
-                        // Inject referrer header after page loads
-                        view?.loadUrl("javascript:(function() { " +
-                            "document.referrer = 'https://www.youtube.com'; " +
-                            "})()")
+                        DebugLogger.d("DirectYouTubeWebView", "Video: Page finished loading: $url")
+                        onWebViewReady(view ?: return)
+                    }
+                    
+                    override fun onReceivedError(
+                        view: WebView?,
+                        errorCode: Int,
+                        description: String?,
+                        failingUrl: String?
+                    ) {
+                        super.onReceivedError(view, errorCode, description, failingUrl)
+                        DebugLogger.e("DirectYouTubeWebView", "Video: Error loading page - $description")
+                        onError()
                     }
                 }
-
-                // Configure IFramePlayerOptions with origin for better embedding compatibility
-                // Setting origin to youtube.com helps avoid embedding restrictions
-                val options = IFramePlayerOptions.Builder(ctx)
-                    .controls(1)
-                    .autoplay(0)
-                    .origin("https://www.youtube.com")
-                    .build()
-                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: IFramePlayerOptions configured with origin")
-
-                val listener = object : AbstractYouTubePlayerListener() {
-                    override fun onReady(player: YouTubePlayer) {
-                        DebugLogger.i("YouTubePlayerListener", "Video $videoIndex: onReady callback triggered")
-                        onPlayerReady(player)
-                        DebugLogger.i("YouTubePlayerListener", "Video $videoIndex: Cueing video at ${offset / 1000f}s")
-                        player.cueVideo(videoId, offset / 1000f)
-                    }
-
-                    override fun onCurrentSecond(youtubePlayer: YouTubePlayer, second: Float) {
-                        onCurrentSecond(second)
-                    }
-
-                    override fun onError(
-                        youtubePlayer: YouTubePlayer,
-                        error: PlayerConstants.PlayerError,
-                    ) {
-                        DebugLogger.e("YouTubePlayerListener", "Video $videoIndex: onError callback - ${error.name}")
-                        onError(error)
-                    }
-
-                    override fun onStateChange(
-                        youtubePlayer: YouTubePlayer,
-                        state: PlayerConstants.PlayerState,
-                    ) {
-                        DebugLogger.d("YouTubePlayerListener", "Video $videoIndex: State changed to ${state.name}")
-                    }
-                }
-                listenerRef.add(listener)
-                initialize(listener, options)
-                DebugLogger.i("YouTubePlayerView", "Video $videoIndex: Player initialized with listener")
+                
+                // Load YouTube video directly
+                val youtubeUrl = "https://www.youtube.com/watch?v=$videoId"
+                DebugLogger.i("DirectYouTubeWebView", "Video: Loading YouTube URL: $youtubeUrl")
+                loadUrl(youtubeUrl)
             }
         },
         onRelease = { view ->
-            // CRITICAL: Properly release YouTubePlayerView to prevent surface leaks
-            // This prevents "Max RTS IDs reached" errors on Vivo/BBK devices
-            DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Releasing player view")
+            DebugLogger.d("DirectYouTubeWebView", "Video: Releasing WebView")
             try {
-                listenerRef.firstOrNull()?.let { listener ->
-                    view.removeYouTubePlayerListener(listener)
-                }
-                view.release()
-                DebugLogger.d("YouTubePlayerView", "Video $videoIndex: Player view released successfully")
+                view.stopLoading()
+                view.loadUrl("about:blank")
+                view.destroy()
+                DebugLogger.d("DirectYouTubeWebView", "Video: WebView released successfully")
             } catch (e: Exception) {
-                DebugLogger.w("YouTubePlayerView", "Video $videoIndex: Error during release: ${e.message}")
+                DebugLogger.w("DirectYouTubeWebView", "Video: Error during release: ${e.message}")
             }
         },
         modifier = Modifier
@@ -915,34 +671,49 @@ fun rememberPlayerController(): PlayerController {
 }
 
 /**
- * Implementation of PlayerController that manages a map of YouTube players
+ * Implementation of PlayerController that manages a map of WebViews
  */
 class PlayerControllerImpl : PlayerController {
-    private val players = mutableMapOf<Int, YouTubePlayer>()
+    private val players = mutableMapOf<Int, WebView>()
 
     override fun playAll() {
         DebugLogger.i("PlayerController", "playAll() called - ${players.size} players registered")
-        players.values.forEach { player ->
-            player.play()
+        players.forEach { (index, webView) ->
+            DebugLogger.d("PlayerController", "Playing video $index")
+            // Inject JavaScript to click the play button
+            webView.loadUrl("javascript:(function() { " +
+                "var playButton = document.querySelector('.ytp-play-button'); " +
+                "if (playButton) playButton.click(); " +
+                "})()")
         }
     }
 
     override fun pauseAll() {
         DebugLogger.i("PlayerController", "pauseAll() called - ${players.size} players registered")
-        players.values.forEach { player ->
-            player.pause()
+        players.forEach { (index, webView) ->
+            DebugLogger.d("PlayerController", "Pausing video $index")
+            // Inject JavaScript to click the pause button
+            webView.loadUrl("javascript:(function() { " +
+                "var pauseButton = document.querySelector('.ytp-play-button'); " +
+                "if (pauseButton) pauseButton.click(); " +
+                "})()")
         }
     }
 
     override fun seekAll(positionMs: Long) {
         DebugLogger.i("PlayerController", "seekAll() called - position: ${positionMs}ms, ${players.size} players")
-        players.forEach { (index, player) ->
+        players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Seeking player $index to ${positionMs}ms")
-            player.seekTo(positionMs / 1000f)
+            // Inject JavaScript to seek to position
+            val positionSeconds = positionMs / 1000f
+            webView.loadUrl("javascript:(function() { " +
+                "var video = document.querySelector('video'); " +
+                "if (video) video.currentTime = $positionSeconds; " +
+                "})()")
         }
     }
 
-    override fun registerPlayer(index: Int, player: YouTubePlayer) {
+    override fun registerPlayer(index: Int, player: WebView) {
         players[index] = player
         DebugLogger.d("PlayerController", "Player registered at index $index - Total: ${players.size}")
     }
