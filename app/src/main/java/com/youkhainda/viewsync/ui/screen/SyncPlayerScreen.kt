@@ -824,11 +824,12 @@ private fun YouTubePlayerViewContainer(
                     }
                 }
 
-                // Configure IFramePlayerOptions with proper origin
-                // Use https://localhost as origin to avoid embedding restrictions
+                // Configure IFramePlayerOptions
+                // Note: origin() is intentionally omitted - YouTube's embedded player rejects
+                // untrusted origins like "localhost". Without origin, YouTube validates based on
+                // the IFrame API context rather than HTTP referrer.
                 val options = IFramePlayerOptions.Builder(ctx)
                     .controls(1)
-                    .origin("https://localhost")
                     .autoplay(0)
                     .build()
                 DebugLogger.d("YouTubePlayerView", "Video $videoIndex: IFramePlayerOptions configured")
