@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
@@ -281,116 +282,23 @@ private fun VideoPlayerCard(
                         },
                     )
                 } else {
-                    AndroidView(
-                        factory = { ctx ->
-                            YouTubePlayerView(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    dpToPx(200),
-                                )
-
-                                // Disable automatic initialization since we're initializing manually
-                                enableAutomaticInitialization = false
-
-                                // Configure WebView with enhanced settings for video playback
-                                val webView = this.getChildAt(0) as? WebView
-                                webView?.settings?.apply {
-                                    javaScriptEnabled = true
-                                    domStorageEnabled = true
-                                    mediaPlaybackRequiresUserGesture = false
-                                    allowFileAccess = false
-                                    allowContentAccess = false
-                                    setSupportMultipleWindows(false)
-                                    setGeolocationEnabled(false)
-                                    // Enable mixed content (HTTP/HTTPS)
-                                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                    // Set user agent to include referrer information
-                                    userAgentString = "$userAgentString"
-                                    // Enable caching for better performance
-                                    cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                                    // Enable database storage for WebView
-                                    databaseEnabled = true
-                                    // Enable DOM storage
-                                    domStorageEnabled = true
-                                }
-
-                                // Set custom WebViewClient to handle URL schemes and referrer
-                                webView?.webViewClient = object : WebViewClient() {
-                                    override fun shouldOverrideUrlLoading(
-                                        view: WebView?,
-                                        request: WebResourceRequest?
-                                    ): Boolean {
-                                        val url = request?.url?.toString() ?: return false
-
-                                        // Handle intent URLs (YouTube app links)
-                                        if (url.startsWith("intent://")) {
-                                            try {
-                                                val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
-                                                view?.context?.startActivity(intent)
-                                                return true
-                                            } catch (e: Exception) {
-                                                // Intent failed, let WebView handle it normally
-                                            }
-                                        }
-
-                                        // Allow YouTube to load normally
-                                        return false
-                                    }
-
-                                    override fun onPageFinished(view: WebView?, url: String?) {
-                                        super.onPageFinished(view, url)
-                                        // Inject referrer header after page loads
-                                        view?.loadUrl("javascript:(function() { " +
-                                            "document.referrer = 'https://www.youtube.com'; " +
-                                            "})()")
-                                    }
-                                }
-
-                                // Configure IFramePlayerOptions with proper origin
-                                // Use https://localhost as origin to avoid embedding restrictions
-                                val options = IFramePlayerOptions.Builder(ctx)
-                                    .controls(1)
-                                    .origin("https://localhost")
-                                    .autoplay(0)
-                                    .build()
-
-                                initialize(object : AbstractYouTubePlayerListener() {
-                                    override fun onReady(player: YouTubePlayer) {
-                                        youtubePlayer = player
-                                        isPlayerReady = true
-                                        playerController.registerPlayer(videoIndex, player)
-                                        player.cueVideo(videoId, offset / 1000f)
-                                    }
-
-                                    override fun onCurrentSecond(youtubePlayer: YouTubePlayer, second: Float) {
-                                        currentTime = (second * 1000).toLong()
-                                    }
-
-                                    override fun onError(
-                                        youtubePlayer: YouTubePlayer,
-                                        error: PlayerConstants.PlayerError,
-                                    ) {
-                                        // Parse error code and provide user-friendly message
-                                        val youTubeError = parseYouTubeError(error)
-                                        playerError = youTubeError
-                                        isPlayerReady = false
-                                    }
-
-                                    override fun onStateChange(
-                                        youtubePlayer: YouTubePlayer,
-                                        state: PlayerConstants.PlayerState,
-                                    ) {
-                                        // Handle state changes if needed
-                                    }
-                                }, options)
-                            }
+                    YouTubePlayerViewContainer(
+                        videoId = videoId,
+                        videoIndex = videoIndex,
+                        offset = offset,
+                        onPlayerReady = { player ->
+                            youtubePlayer = player
+                            isPlayerReady = true
+                            playerController.registerPlayer(videoIndex, player)
                         },
-                        update = { view ->
-                            // Player already registered in onReady
+                        onError = { error ->
+                            val youTubeError = parseYouTubeError(error)
+                            playerError = youTubeError
+                            isPlayerReady = false
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp),
+                        onCurrentSecond = { second ->
+                            currentTime = (second * 1000).toLong()
+                        },
                     )
                 }
             } else {
@@ -788,6 +696,139 @@ private fun formatTime(milliseconds: Long): String {
 
 private fun dpToPx(dp: Int): Int {
     return (dp * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
+}
+
+/**
+ * YouTubePlayerViewContainer - Custom AndroidView with proper lifecycle management
+ * 
+ * This component properly initializes and releases YouTubePlayerView to prevent
+ * surface leaks that cause "Max RTS IDs reached" errors on Vivo/BBK devices.
+ */
+@Composable
+private fun YouTubePlayerViewContainer(
+    videoId: String,
+    videoIndex: Int,
+    offset: Long,
+    onPlayerReady: (YouTubePlayer) -> Unit,
+    onError: (PlayerConstants.PlayerError) -> Unit,
+    onCurrentSecond: (Float) -> Unit,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    AndroidView(
+        factory = { ctx ->
+            YouTubePlayerView(ctx).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dpToPx(200),
+                )
+
+                // Disable automatic initialization since we're initializing manually
+                enableAutomaticInitialization = false
+
+                // Configure WebView with enhanced settings for video playback
+                val webView = this.getChildAt(0) as? WebView
+                webView?.settings?.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    mediaPlaybackRequiresUserGesture = false
+                    allowFileAccess = false
+                    allowContentAccess = false
+                    setSupportMultipleWindows(false)
+                    setGeolocationEnabled(false)
+                    // Enable mixed content (HTTP/HTTPS)
+                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    // Set user agent to include referrer information
+                    userAgentString = "$userAgentString"
+                    // Enable caching for better performance
+                    cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                    // Enable database storage for WebView
+                    databaseEnabled = true
+                    // Enable DOM storage
+                    domStorageEnabled = true
+                }
+
+                // Set custom WebViewClient to handle URL schemes and referrer
+                webView?.webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): Boolean {
+                        val url = request?.url?.toString() ?: return false
+
+                        // Handle intent URLs (YouTube app links)
+                        if (url.startsWith("intent://")) {
+                            try {
+                                val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                                view?.context?.startActivity(intent)
+                                return true
+                            } catch (e: Exception) {
+                                // Intent failed, let WebView handle it normally
+                            }
+                        }
+
+                        // Allow YouTube to load normally
+                        return false
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        // Inject referrer header after page loads
+                        view?.loadUrl("javascript:(function() { " +
+                            "document.referrer = 'https://www.youtube.com'; " +
+                            "})()")
+                    }
+                }
+
+                // Configure IFramePlayerOptions with proper origin
+                // Use https://localhost as origin to avoid embedding restrictions
+                val options = IFramePlayerOptions.Builder(ctx)
+                    .controls(1)
+                    .origin("https://localhost")
+                    .autoplay(0)
+                    .build()
+
+                initialize(object : AbstractYouTubePlayerListener() {
+                    override fun onReady(player: YouTubePlayer) {
+                        onPlayerReady(player)
+                        player.cueVideo(videoId, offset / 1000f)
+                    }
+
+                    override fun onCurrentSecond(youtubePlayer: YouTubePlayer, second: Float) {
+                        onCurrentSecond(second)
+                    }
+
+                    override fun onError(
+                        youtubePlayer: YouTubePlayer,
+                        error: PlayerConstants.PlayerError,
+                    ) {
+                        onError(error)
+                    }
+
+                    override fun onStateChange(
+                        youtubePlayer: YouTubePlayer,
+                        state: PlayerConstants.PlayerState,
+                    ) {
+                        // Handle state changes if needed
+                    }
+                }, options)
+            }
+        },
+        onRelease = { view ->
+            // CRITICAL: Properly release YouTubePlayerView to prevent surface leaks
+            // This prevents "Max RTS IDs reached" errors on Vivo/BBK devices
+            try {
+                view.removeYouTubePlayerListener()
+                view.release()
+            } catch (e: Exception) {
+                // Ignore errors during cleanup
+            }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp),
+    )
 }
 
 /**
