@@ -110,7 +110,7 @@ class OAuth2Manager(private val context: Context) {
             DebugLogger.i(TAG, "Sign-in successful - User: ${account.displayName}, Email: ${account.email}")
 
             // Check granted scopes
-            val grantedScopes = account.grantedScopes?.map { it.scope } ?: emptyList()
+            val grantedScopes: List<String> = account.grantedScopes?.map { s: com.google.android.gms.common.api.Scope -> s.scope } ?: emptyList()
             DebugLogger.d(TAG, "Granted scopes: $grantedScopes")
 
             if (!hasYouTubeScope(grantedScopes)) {
