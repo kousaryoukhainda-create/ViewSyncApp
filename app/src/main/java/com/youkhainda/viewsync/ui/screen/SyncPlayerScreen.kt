@@ -85,6 +85,10 @@ fun SyncPlayerScreen(
                     onRecordCue = { videoIdx, time, desc -> viewModel.recordSyncCue(videoIdx, time, desc) },
                     onGenerateLink = { viewModel.generateShareLink() },
                     onAddVideo = onAddVideo,
+                    onToggleLike = { viewModel.toggleLike() },
+                    onToggleSubscribe = { viewModel.toggleSubscribe() },
+                    onIncrementShare = { viewModel.incrementShare() },
+                    onIncrementComment = { viewModel.incrementComment() },
                 )
             }
 
@@ -123,6 +127,10 @@ private fun SyncPlayerContent(
     onRecordCue: (Int, Long, String) -> Unit,
     onGenerateLink: () -> Unit,
     onAddVideo: () -> Unit,
+    onToggleLike: () -> Unit,
+    onToggleSubscribe: () -> Unit,
+    onIncrementShare: () -> Unit,
+    onIncrementComment: () -> Unit,
 ) {
     val scrollState = rememberScrollState()
 
@@ -192,11 +200,16 @@ private fun SyncPlayerContent(
         PlaybackControlsSection(
             isPlaying = syncState.isPlaying,
             currentPosition = syncState.currentPlayPosition,
-            onPlay = { 
+            isLiked = syncState.isLiked,
+            isSubscribed = syncState.isSubscribed,
+            likeCount = syncState.likeCount,
+            shareCount = syncState.shareCount,
+            commentCount = syncState.commentCount,
+            onPlay = {
                 playerController.playAll()
                 onPlay()
             },
-            onPause = { 
+            onPause = {
                 playerController.pauseAll()
                 onPause()
             },
@@ -204,6 +217,10 @@ private fun SyncPlayerContent(
                 playerController.seekAll(position)
                 onSeek(position)
             },
+            onToggleLike = onToggleLike,
+            onToggleSubscribe = onToggleSubscribe,
+            onIncrementShare = onIncrementShare,
+            onIncrementComment = onIncrementComment,
         )
 
         // Sync Cues List
@@ -375,9 +392,18 @@ private fun VideoPlayerCard(
 private fun PlaybackControlsSection(
     isPlaying: Boolean,
     currentPosition: Long,
+    isLiked: Boolean,
+    isSubscribed: Boolean,
+    likeCount: Int,
+    shareCount: Int,
+    commentCount: Int,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onSeek: (Long) -> Unit,
+    onToggleLike: () -> Unit,
+    onToggleSubscribe: () -> Unit,
+    onIncrementShare: () -> Unit,
+    onIncrementComment: () -> Unit,
 ) {
     Surface(
         modifier = Modifier
@@ -395,15 +421,12 @@ private fun PlaybackControlsSection(
                 style = MaterialTheme.typography.labelLarge,
             )
 
+            // Play/Pause and time display
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { onSeek(maxOf(0, currentPosition - 5000)) }) {
-                    Icon(Icons.Default.SkipPrevious, contentDescription = "Rewind")
-                }
-
                 FloatingActionButton(
                     onClick = if (isPlaying) onPause else onPlay,
                     modifier = Modifier.size(56.dp),
@@ -414,16 +437,55 @@ private fun PlaybackControlsSection(
                     )
                 }
 
-                IconButton(onClick = { onSeek(currentPosition + 5000) }) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "Fast forward")
-                }
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Text(
+                    text = formatTime(currentPosition),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                )
             }
 
-            Text(
-                text = formatTime(currentPosition),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
+            // Action buttons row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Like button
+                ActionButtonWithCount(
+                    icon = Icons.Default.Favorite,
+                    count = likeCount,
+                    isActive = isLiked,
+                    activeColor = MaterialTheme.colorScheme.primary,
+                    onClick = onToggleLike,
+                    label = "Like",
+                )
+
+                // Share button
+                ActionButtonWithCount(
+                    icon = Icons.Default.Share,
+                    count = shareCount,
+                    isActive = false,
+                    onClick = onIncrementShare,
+                    label = "Share",
+                )
+
+                // Comment button
+                ActionButtonWithCount(
+                    icon = Icons.Default.Comment,
+                    count = commentCount,
+                    isActive = false,
+                    onClick = onIncrementComment,
+                    label = "Comment",
+                )
+
+                // Subscribe button
+                SubscribeButton(
+                    isSubscribed = isSubscribed,
+                    onClick = onToggleSubscribe,
+                )
+            }
         }
     }
 }
@@ -496,6 +558,84 @@ private fun ShareSection(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ActionButtonWithCount(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    count: Int,
+    isActive: Boolean,
+    activeColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.error,
+    onClick: () -> Unit,
+    label: String,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier.size(48.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (isActive) activeColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (count > 0) {
+                Text(
+                    text = if (count >= 1000) "${count / 1000}k" else count.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isActive) activeColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SubscribeButton(
+    isSubscribed: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Button(
+            onClick = onClick,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isSubscribed) {
+                    MaterialTheme.colorScheme.surfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+            ),
+            modifier = Modifier.height(36.dp),
+        ) {
+            Icon(
+                imageVector = if (isSubscribed) Icons.Default.Check else Icons.Default.Notifications,
+                contentDescription = if (isSubscribed) "Subscribed" else "Subscribe",
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = if (isSubscribed) "Subscribed" else "Subscribe",
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
     }
 }

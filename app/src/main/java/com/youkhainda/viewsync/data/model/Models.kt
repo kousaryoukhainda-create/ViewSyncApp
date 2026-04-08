@@ -34,6 +34,11 @@ data class SyncState(
     val currentPlayPosition: Long = 0L,
     val isPlaying: Boolean = false,
     val videoOffsets: Map<Int, Long> = emptyMap(), // video index -> offset in ms
+    val isLiked: Boolean = false,
+    val isSubscribed: Boolean = false,
+    val likeCount: Int = 0,
+    val shareCount: Int = 0,
+    val commentCount: Int = 0,
 )
 
 // API Response Models

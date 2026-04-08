@@ -74,6 +74,35 @@ class SyncPlayerViewModel @Inject constructor(
         _syncState.value = _syncState.value.copy(currentPlayPosition = positionMs)
     }
 
+    fun toggleLike() {
+        DebugLogger.i("SyncPlayerVM", "toggleLike() called")
+        val currentState = _syncState.value
+        val newLikedState = !currentState.isLiked
+        val newLikeCount = if (newLikedState) currentState.likeCount + 1 else currentState.likeCount - 1
+        _syncState.value = currentState.copy(
+            isLiked = newLikedState,
+            likeCount = maxOf(0, newLikeCount)
+        )
+    }
+
+    fun toggleSubscribe() {
+        DebugLogger.i("SyncPlayerVM", "toggleSubscribe() called")
+        val currentState = _syncState.value
+        _syncState.value = currentState.copy(isSubscribed = !currentState.isSubscribed)
+    }
+
+    fun incrementShare() {
+        DebugLogger.i("SyncPlayerVM", "incrementShare() called")
+        val currentState = _syncState.value
+        _syncState.value = currentState.copy(shareCount = currentState.shareCount + 1)
+    }
+
+    fun incrementComment() {
+        DebugLogger.i("SyncPlayerVM", "incrementComment() called")
+        val currentState = _syncState.value
+        _syncState.value = currentState.copy(commentCount = currentState.commentCount + 1)
+    }
+
     fun recordSyncCue(videoIndex: Int, cueTimeMs: Long, description: String = "") {
         DebugLogger.i("SyncPlayerVM", "recordSyncCue() - Video: $videoIndex, Time: ${cueTimeMs}ms, Desc: $description")
         viewModelScope.launch {
