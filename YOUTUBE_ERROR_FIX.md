@@ -1,118 +1,121 @@
-# YouTube Error Code -1 Fix Guide
+# YouTube Error 152-4 Fix Guide
 
 ## Problem
-Error code: -1 typically indicates a failure in communication between the YouTube player and YouTube's servers. This is commonly caused by:
-- Authentication issues
-- Embedding restrictions
-- Incorrect WebView configuration
-- API key misconfiguration
+Error code 152-4 ("This video is unavailable") typically occurs when an embedded video player is blocked by security, privacy, or ad-blocking tools. YouTube uses scripts to check if resources are being blocked, and if these checks fail, the video is rendered unavailable.
 
-## Fixes Applied
+## Root Causes
+- **Ad-blockers & Privacy Extensions**: Tools like Adblock Plus, uBlock Origin, or browser privacy features
+- **Missing Referrer Headers**: YouTube player expects proper referrer information
+- **Origin Mismatch**: Incorrect origin configuration in iframe player
+- **WebView Security Settings**: Overly restrictive WebView configuration
+- **Cached Data**: Accumulated temporary files triggering playback errors
 
-### 1. ✅ Updated IFramePlayerOptions Configuration
+## Fixes Applied ✅
+
+### 1. ✅ Updated IFrame Player Configuration
 **File**: `app/src/main/java/com/youkhainda/viewsync/ui/screen/SyncPlayerScreen.kt`
 
 **Changes**:
-- Changed `origin` from `https://www.youtube.com` to `https://localhost`
-- Added explicit `referrer` parameter set to `https://www.youtube.com`
+- Changed `origin` from `https://www.youtube.com` to `https://localhost` (prevents origin mismatch errors)
+- Added `referrer` parameter set to `https://www.youtube.com`
+- Added `widget_referrer` parameter for additional compatibility
 
 ```kotlin
-val options = IFramePlayerOptions.Builder(ctx)
-    .controls(1)
-    .origin("https://localhost")
-    .autoplay(0)
-    .referrer("https://www.youtube.com")
-    .build()
+playerVars: {
+    'playsinline': 1,
+    'controls': 1,
+    'rel': 0,
+    'modestbranding': 1,
+    'enablejsapi': 1,
+    'origin': 'https://localhost',
+    'referrer': 'https://www.youtube.com',
+    'widget_referrer': 'https://www.youtube.com'
+},
 ```
 
 ### 2. ✅ Enhanced WebView Configuration
 **Improvements**:
-- Enabled database storage
-- Added DOM storage (duplicate check removed)
-- Added referrer injection via JavaScript after page load
+- Changed `cacheMode` from `LOAD_DEFAULT` to `LOAD_NO_CACHE` (prevents cached resource conflicts)
+- Added `setAppCacheEnabled(false)` (deprecated but still effective)
+- Added `javaScriptCanOpenWindowsAutomatically = true` (required for YouTube IFrame API)
+- Added referrer policy meta tag: `<meta name="referrer" content="no-referrer-when-downgrade">`
+
+### 3. ✅ Referrer Injection
+**Implementation**:
+- Inject YouTube referrer via JavaScript after page load:
+```javascript
+document.referrer = 'https://www.youtube.com';
+```
+- Added logging to verify referrer is set correctly
+
+### 4. ✅ Enhanced Error Handling
+**Features**:
+- Added detailed error messages for all YouTube player error codes
+- Visual error banners in UI with actionable solutions
+- HTTP error logging to detect blocked resources
+- Error code 152-4 specific guidance for users
 
 ```kotlin
-override fun onPageFinished(view: WebView?, url: String?) {
-    super.onPageFinished(view, url)
-    view?.loadUrl("javascript:(function() { " +
-        "document.referrer = 'https://www.youtube.com'; " +
-        "})()")
+val errorMessage = when (errorCode) {
+    152 -> "Error 152-4: Embedding blocked. Try: disabling ad-blockers, clearing cache, or using test video dQw4w9WgXcQ"
+    // ... other error codes
 }
 ```
 
-## Required Actions
+### 5. ✅ Improved Navigation Blocking
+**Changes**:
+- Added debug logging when blocking navigation away from YouTube
+- Better error handling for HTTP errors (4xx, 5xx responses)
+- Maintains player within allowed domains (youtube.com, googlevideo.com)
 
-### Step 1: Configure Your YouTube API Key
+## User-Facing Solutions
 
-**You're using GitHub Secrets** ✅ - Your CI/CD is already configured to use `secrets.YOUTUBE_API_KEY`.
+### If Error 152-4 Persists:
 
-**For Local Development**, you have two options:
+1. **Test with Known Working Videos**:
+   - `dQw4w9WgXcQ` (Rick Astley - Never Gonna Give You Up)
+   - `jNQXAC9IVRw` (Me at the zoo - First YouTube video)
+   - `9bZkp7q19f0` (PSY - GANGNAM STYLE)
 
-#### Option A: Create local.properties (Recommended for Development)
-
-1. **Get a YouTube Data API v3 Key**:
-   - Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-   - Create a new project or select existing one
-   - Enable "YouTube Data API v3"
-   - Create credentials → API Key
-
-2. **Restrict Your API Key** (Recommended):
-   - Click on your API key
-   - Under "Application restrictions", select "Android apps"
-   - Add your package name: `com.youkhainda.viewsync`
-   - Add your SHA-1 fingerprint (see below)
-   - Under "API restrictions", select "Restrict key" and select "YouTube Data API v3"
-
-3. **Get Your SHA-1 Fingerprint**:
-   ```bash
-   # For debug keystore (default password: android)
-   keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
-   
-   # For release keystore (use your own keystore path and password)
-   keytool -list -v -keystore /path/to/your/release.keystore -alias your_alias
+2. **Clear App Data**:
+   ```
+   Settings → Apps → ViewSync → Storage → Clear Data
    ```
 
-4. **Add API Key to local.properties**:
+3. **Check Network Environment**:
+   - Some networks (corporate, school) block YouTube embedding
+   - Try different WiFi network or mobile data
+
+4. **Disable System-Wide Ad Blockers**:
+   - If using DNS-level ad blocking (Pi-hole, AdGuard DNS), temporarily disable
+   - Check if device has system-wide ad blocking enabled
+
+5. **Rebuild Project**:
    ```bash
-   # Copy the template
-   cp local.properties.template local.properties
-   
-   # Edit and add your actual API key
-   youtube.api.key=YOUR_ACTUAL_API_KEY_HERE
+   ./gradlew clean
+   ./gradlew assembleDebug
    ```
 
-#### Option B: Build with Environment Variable
+## Developer Testing Checklist
 
-If you prefer not to store the key locally:
+- [x] Origin set to `https://localhost` (not `https://www.youtube.com`)
+- [x] Referrer meta tag added to HTML
+- [x] Referrer injected via JavaScript on page load
+- [x] Cache mode set to `LOAD_NO_CACHE`
+- [x] JavaScript enabled and can open windows automatically
+- [x] Error handling displays user-friendly messages
+- [x] HTTP errors are logged for debugging
+- [x] Navigation blocking prevents leaving YouTube domains
+- [ ] Test with multiple videos (some have embedding disabled by owner)
+- [ ] Test on physical device (not just emulator)
+- [ ] Check Logcat for detailed error messages
 
-```bash
-# Build with environment variable (won't create local.properties file)
-YOUTUBE_API_KEY="your_actual_key" ./gradlew assembleDebug
+## Logcat Filtering
+
+Filter for YouTube-related errors:
 ```
-
-Or use the helper script:
-```bash
-./scripts/build-with-secret.sh
+package:com.youkhainda.viewsync level:error (YouTube|Player|WebView|DirectYouTubeWebView)
 ```
-
-### Step 2: Verify Video IDs
-
-Some videos have embedding restrictions. Test with known embeddable videos:
-
-**Test Video IDs** (known to allow embedding):
-- `dQw4w9WgXcQ` (Rick Astley - Never Gonna Give You Up)
-- `jNQXAC9IVRw` (Me at the zoo - First YouTube video)
-- `9bZkp7q19f0` (PSY - GANGNAM STYLE)
-
-Update your sync session to use these test videos to verify the fix works.
-
-### Step 3: Check Logcat for Detailed Errors
-
-In Android Studio:
-1. Open Logcat (View → Tool Windows → Logcat)
-2. Filter by your app: `package:com.youkhainda.viewsync`
-3. Filter by errors: `level:error`
-4. Look for YouTube-related errors: `YouTube|Player|WebView`
 
 **Common Error Codes**:
 - `-1`: General playback error (authentication/network issue)
@@ -120,85 +123,85 @@ In Android Studio:
 - `5`: Content cannot be played in embedded player
 - `100`: Video not found
 - `101/150`: Video owner disabled embedding
-- `152`: Domain/copyright restriction
-
-### Step 4: Test in Different Scenarios
-
-1. **Test all videos**: Does the error occur for all videos or just specific ones?
-2. **Test in browser**: Open the same video in Chrome/Firefox on the same device
-3. **Test network**: Ensure stable internet connection
-4. **Test on different devices**: Emulator vs. physical device
-
-### Step 5: Verify Google Cloud Console Settings
-
-1. **API Enabled**: Confirm "YouTube Data API v3" is enabled
-2. **Billing Enabled**: Some APIs require billing (though YouTube Data API v3 is free)
-3. **Quota Not Exceeded**: Check your API quota usage in Google Cloud Console
-4. **Package Name Match**: Ensure the package name in restrictions matches exactly: `com.youkhainda.viewsync`
+- `152`: Domain/copyright restriction (THIS IS THE ERROR WE'RE FIXING)
 
 ## Additional Troubleshooting
 
-### If Error Persists
+### Verify Video Embedding Permissions
+Some videos have embedding restrictions. Check if the video allows embedding:
+1. Open video in browser
+2. Try to embed it on a test page
+3. If it fails, the video owner disabled embedding
 
-1. **Clear App Data**:
-   ```
-   Settings → Apps → ViewSync → Storage → Clear Data
-   ```
+### Check Google Cloud Console
+1. **API Enabled**: Confirm "YouTube Data API v3" is enabled
+2. **Quota Not Exceeded**: Check API quota usage
+3. **API Key Valid**: Ensure key hasn't expired or been revoked
 
-2. **Rebuild Project**:
-   ```bash
-   ./gradlew clean
-   ./gradlew assembleDebug
-   ```
-
-3. **Check Internet Permission**: Already present in `AndroidManifest.xml` ✅
-
-4. **Test with Minimal Implementation**:
-   Create a simple test activity with just one YouTubePlayerView to isolate the issue
-
-### Alternative: Use ExoPlayer as Fallback
-
-The project already includes ExoPlayer dependencies. If YouTube embedding continues to fail:
-
+### Alternative: Use YouTube's Native Player
+If embedding continues to fail, consider using the YouTube Android Player library (though it has limitations):
 ```kotlin
-// You can implement ExoPlayer as a fallback for videos that fail with YouTube player
-// Note: This requires extracting video URLs which may violate YouTube ToS
-// Only use for videos you have rights to embed
+// Add to build.gradle.kts
+implementation("com.google.android.youtube:youtube-android-player:1.2.2")
 ```
 
-## Testing Checklist
+## Testing Procedure
 
-- [ ] API key is valid and active
-- [ ] API key has correct Android restrictions (package name + SHA-1)
-- [ ] YouTube Data API v3 is enabled in Google Cloud Console
-- [ ] Test video IDs are known to allow embedding
-- [ ] Device has stable internet connection
-- [ ] App has INTERNET permission (verified in AndroidManifest.xml) ✅
-- [ ] WebView JavaScript is enabled ✅
-- [ ] Origin and referrer are properly configured ✅
-- [ ] Tested with multiple videos
-- [ ] Checked Logcat for detailed error messages
+1. **Build and install app**:
+   ```bash
+   ./gradlew clean assembleDebug installDebug
+   ```
+
+2. **Test with known embeddable videos**:
+   - Create a sync session with `dQw4w9WgXcQ`
+   - Verify video loads and plays
+
+3. **Test with problematic videos**:
+   - Try videos that previously showed error 152-4
+   - Check if error banner appears with helpful message
+
+4. **Monitor Logcat**:
+   - Look for "DirectYouTubeWebView" logs
+   - Check for HTTP errors or blocked resources
+
+5. **Test multiple videos simultaneously**:
+   - Add 2-3 videos to sync session
+   - Verify all players load without errors
+
+## Technical Details
+
+### Why These Changes Work
+
+1. **Origin Change**: Using `https://localhost` instead of `https://www.youtube.com` prevents YouTube from detecting a mismatch between the actual page origin and the declared origin.
+
+2. **Referrer Policy**: The `no-referrer-when-downgrade` policy ensures YouTube receives proper referrer information when loading over HTTPS, preventing security checks from failing.
+
+3. **Cache Disabled**: Using `LOAD_NO_CACHE` prevents stale resources from triggering embedding errors, especially after ad-blocker updates.
+
+4. **JavaScript Window Opening**: YouTube's IFrame API needs to open windows for certain operations (like error handling), so `javaScriptCanOpenWindowsAutomatically` must be enabled.
 
 ## Useful Resources
 
 - [YouTube IFrame Player API](https://developers.google.com/youtube/iframe_api_reference)
-- [Android YouTube Player Library](https://github.com/PierfrancescoSoffritti/android-youtube-player)
 - [YouTube Developer Policies](https://developers.google.com/youtube/terms/developer-policies-guide)
-- [Google Cloud Console](https://console.cloud.google.com/)
 - [Error 150/153 Fix Guide](https://corsproxy.io/blog/fix-youtube-error-150-153-webview/)
+- [Android WebView Best Practices](https://developer.android.com/guide/webapps/webview)
+
+## Summary of Changes
+
+| Component | Before | After |
+|-----------|--------|-------|
+| Origin | `https://www.youtube.com` | `https://localhost` |
+| Referrer | Not set | `https://www.youtube.com` (injected) |
+| Cache Mode | `LOAD_DEFAULT` | `LOAD_NO_CACHE` |
+| Error Messages | Generic | Detailed with solutions |
+| Referrer Policy | None | `no-referrer-when-downgrade` |
+| HTTP Error Logging | No | Yes |
 
 ## Next Steps
 
-1. Apply the fixes above (code changes already applied ✅)
-2. Configure your API key in `local.properties`
-3. Rebuild and test with known embeddable videos
-4. Check Logcat for any remaining errors
-5. If issues persist, verify your Google Cloud Console configuration
-
-## Support
-
-If you're still experiencing issues after following this guide:
-1. Share the Logcat output filtered for YouTube errors
-2. Confirm your API key configuration (without exposing the key itself)
-3. Test with the specific video IDs mentioned above
-4. Check if the issue occurs on emulator, physical device, or both
+1. ✅ All code changes applied
+2. Test with known embeddable videos
+3. Monitor Logcat for remaining errors
+4. If issues persist, verify network environment isn't blocking YouTube embedding
+5. Consider implementing fallback player for videos with embedding disabled

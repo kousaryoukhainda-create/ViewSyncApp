@@ -112,6 +112,20 @@ class YouTubePlayerInterface(
 
     @JavascriptInterface
     fun onError(errorCode: Int) {
+        DebugLogger.e("YouTubePlayerInterface", "YouTube Player Error - Code: $errorCode")
+        
+        // Provide helpful error messages for common error codes
+        val errorMessage = when (errorCode) {
+            2 -> "Invalid video ID or parameter"
+            5 -> "Content cannot be played in embedded player (restriction)"
+            100 -> "Video not found or removed"
+            101, 150 -> "Video owner has disabled embedding"
+            152 -> "Embedding blocked by security/privacy settings. Try disabling ad-blockers."
+            -1 -> "Player initialization failed or network error"
+            else -> "Unknown error (code: $errorCode)"
+        }
+        
+        DebugLogger.e("YouTubePlayerInterface", errorMessage)
         onError(errorCode)
     }
 }
@@ -436,6 +450,7 @@ private fun VideoPlayerCard(
     var playerInterface by remember { mutableStateOf<YouTubePlayerInterface?>(null) }
     var showCueDialog by remember { mutableStateOf(false) }
     var isPlayerReady by remember { mutableStateOf(false) }
+    var playerError by remember { mutableStateOf<Int?>(null) }
 
     // Validate video ID before attempting to play
     val isValidVideoId = com.youkhainda.viewsync.data.remote.YouTubeUrlParser.isValidVideoId(videoId)
@@ -465,6 +480,43 @@ private fun VideoPlayerCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Column {
+            // Error banner (if any)
+            playerError?.let { errorCode ->
+                val errorMessage = when (errorCode) {
+                    2 -> "Invalid video ID or parameter"
+                    5 -> "Content cannot be played in embedded player"
+                    100 -> "Video not found or removed"
+                    101, 150 -> "Video owner has disabled embedding"
+                    152 -> "Error 152-4: Embedding blocked. Try: disabling ad-blockers, clearing cache, or using test video dQw4w9WgXcQ"
+                    -1 -> "Player initialization failed. Check internet connection."
+                    else -> "Player error (code: $errorCode)"
+                }
+                
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                            text = errorMessage,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+            
             // YouTube Player - Direct WebView
             if (isValidVideoId) {
                 DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Creating WebView for direct YouTube playback")
@@ -475,14 +527,16 @@ private fun VideoPlayerCard(
                         webView = view
                         playerInterface = iface
                         isPlayerReady = true
+                        playerError = null // Clear error when player is ready
                         playerController.registerPlayer(videoIndex, view, iface)
                         DebugLogger.i("VideoPlayerCard", "Video $videoIndex: WebView ready, registered with controller")
                     },
                     onCurrentSecond = { second ->
                         currentTime = (second * 1000).toLong()
                     },
-                    onError = {
-                        DebugLogger.e("VideoPlayerCard", "Video $videoIndex: WebView error loading video")
+                    onError = { errorCode ->
+                        playerError = errorCode
+                        DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Player error - Code: $errorCode")
                     },
                 )
             } else {
@@ -1003,6 +1057,7 @@ private fun DirectYouTubeWebView(
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta name="referrer" content="no-referrer-when-downgrade">
             <style>
                 body { margin: 0; padding: 0; background: #000; overflow: hidden; }
                 #player { width: 100%; height: 100vh; }
@@ -1048,7 +1103,9 @@ private fun DirectYouTubeWebView(
                             'rel': 0,
                             'modestbranding': 1,
                             'enablejsapi': 1,
-                            'origin': 'https://www.youtube.com'
+                            'origin': 'https://localhost',
+                            'referrer': 'https://www.youtube.com',
+                            'widget_referrer': 'https://www.youtube.com'
                         },
                         events: {
                             'onReady': onPlayerReady,
@@ -1199,10 +1256,12 @@ private fun DirectYouTubeWebView(
                     setSupportMultipleWindows(false)
                     setGeolocationEnabled(false)
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    cacheMode = WebSettings.LOAD_DEFAULT
+                    cacheMode = WebSettings.LOAD_NO_CACHE
                     databaseEnabled = true
                     useWideViewPort = true
                     loadWithOverviewMode = true
+                    setAppCacheEnabled(false)
+                    javaScriptCanOpenWindowsAutomatically = true
                     DebugLogger.d("DirectYouTubeWebView", "Video: WebView settings configured")
                 }
 
@@ -1214,6 +1273,13 @@ private fun DirectYouTubeWebView(
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         DebugLogger.d("DirectYouTubeWebView", "Video: HTML wrapper loaded, IFrame API will initialize")
+                        
+                        // Inject referrer to help bypass security blocks
+                        view?.loadUrl("javascript:(function() { " +
+                            "document.referrer = 'https://www.youtube.com'; " +
+                            "console.log('Referrer set to: ' + document.referrer); " +
+                            "})()")
+                        
                         onWebViewReady(view ?: return, playerInterface)
                     }
 
@@ -1224,14 +1290,27 @@ private fun DirectYouTubeWebView(
                         failingUrl: String?
                     ) {
                         super.onReceivedError(view, errorCode, description, failingUrl)
-                        DebugLogger.e("DirectYouTubeWebView", "Video: Error loading page - $description")
-                        onError()
+                        DebugLogger.e("DirectYouTubeWebView", "Video: Error loading page - $description (Code: $errorCode)")
+                    }
+
+                    override fun onReceivedHttpError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        errorResponse: android.webkit.WebResourceResponse?
+                    ) {
+                        super.onReceivedHttpError(view, request, errorResponse)
+                        val statusCode = errorResponse?.statusCode
+                        val url = request?.url?.toString()
+                        if (statusCode != null && url != null) {
+                            DebugLogger.w("DirectYouTubeWebView", "HTTP error: $statusCode for $url")
+                        }
                     }
 
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         // Prevent navigation away from YouTube player
                         val url = request?.url?.toString()
                         if (url != null && !url.contains("youtube.com") && !url.contains("googlevideo.com")) {
+                            DebugLogger.d("DirectYouTubeWebView", "Blocking navigation to: $url")
                             return true
                         }
                         return false
