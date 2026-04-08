@@ -6,7 +6,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
 import com.google.android.gms.tasks.Task
 import com.youkhainda.viewsync.BuildConfig
 import com.youkhainda.viewsync.util.DebugLogger
@@ -36,15 +36,12 @@ class OAuth2Manager(private val context: Context) {
 
         DebugLogger.d(TAG, "OAuth Client ID configured: ${hasClientId}")
 
-        val gsoBuilder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestIdToken(clientId.takeIf { hasClientId } ?: "")
+            .requestScopes(Scope(YOUTUBE_SCOPE))
+            .build()
 
-        if (hasClientId) {
-            gsoBuilder.requestScopes(com.google.android.gms.common.api.Scope(YOUTUBE_SCOPE))
-        }
-
-        val gso = gsoBuilder.build()
         GoogleSignIn.getClient(context, gso)
     }
 
@@ -82,28 +79,10 @@ class OAuth2Manager(private val context: Context) {
             return@suspendCancellableCoroutine
         }
 
-        GoogleSignIn.silentSignIn()
-            .addOnSuccessListener { signedInAccount ->
-                DebugLogger.d(TAG, "Silent sign-in successful, getting access token")
-                getAccessTokenFromAccount(signedInAccount, continuation)
-            }
-            .addOnFailureListener { e ->
-                DebugLogger.w(TAG, "Silent sign-in failed: ${e.message}")
-                continuation.resume(null)
-            }
-    }
-
-    private fun getAccessTokenFromAccount(
-        account: GoogleSignInAccount,
-        continuation: kotlinx.coroutines.CancellableContinuation<String?>
-    ) {
-        GoogleSignIn.getAccountForExtension(context, googleSignInClient.googleSignInOptions)
-            .requestEmail()
-
-        // Use the ID token or request a fresh access token
+        // Use the ID token from the cached account
         val idToken = account.idToken
         if (idToken != null) {
-            DebugLogger.d(TAG, "Using ID token for authentication")
+            DebugLogger.d(TAG, "Using cached ID token for authentication")
             continuation.resume(idToken)
         } else {
             // Need to re-authenticate to get fresh token
@@ -127,7 +106,7 @@ class OAuth2Manager(private val context: Context) {
      */
     fun handleSignInResult(task: Task<GoogleSignInAccount>): GoogleSignInAccount? {
         return try {
-            val account = task.getResult(ApiException::class.java)
+            val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
             DebugLogger.i(TAG, "Sign-in successful - User: ${account.displayName}, Email: ${account.email}")
 
             // Check granted scopes
@@ -139,7 +118,7 @@ class OAuth2Manager(private val context: Context) {
             }
 
             account
-        } catch (e: ApiException) {
+        } catch (e: com.google.android.gms.common.api.ApiException) {
             DebugLogger.e(TAG, "Sign-in failed - Status: ${e.statusCode}, Message: ${e.statusMessage}")
             null
         }
