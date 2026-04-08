@@ -680,11 +680,35 @@ class PlayerControllerImpl : PlayerController {
         DebugLogger.i("PlayerController", "playAll() called - ${players.size} players registered")
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Playing video $index")
-            // Inject JavaScript to click the play button
-            webView.loadUrl("javascript:(function() { " +
-                "var playButton = document.querySelector('.ytp-play-button'); " +
-                "if (playButton) playButton.click(); " +
-                "})()")
+            // Use evaluateJavascript for better reliability and error handling
+            val playScript = """
+                (function() {
+                    // Try multiple selectors for the play button
+                    var playButton = document.querySelector('.ytp-play-button') ||
+                                     document.querySelector('.ytp-play-btn') ||
+                                     document.querySelector('button[aria-label*="Play"]') ||
+                                     document.querySelector('button[aria-label*="play"]') ||
+                                     document.querySelector('.html5-video-player button[data-title*="Play"]');
+                    
+                    if (playButton) {
+                        playButton.click();
+                        return 'Play button clicked';
+                    }
+                    
+                    // Fallback: try to play video directly
+                    var video = document.querySelector('video');
+                    if (video && video.paused) {
+                        video.play();
+                        return 'Video play() called';
+                    }
+                    
+                    return 'No play control found';
+                })()
+            """.trimIndent()
+            
+            webView.evaluateJavascript(playScript) { result ->
+                DebugLogger.d("PlayerController", "Video $index play result: $result")
+            }
         }
     }
 
@@ -692,11 +716,35 @@ class PlayerControllerImpl : PlayerController {
         DebugLogger.i("PlayerController", "pauseAll() called - ${players.size} players registered")
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Pausing video $index")
-            // Inject JavaScript to click the pause button
-            webView.loadUrl("javascript:(function() { " +
-                "var pauseButton = document.querySelector('.ytp-play-button'); " +
-                "if (pauseButton) pauseButton.click(); " +
-                "})()")
+            // Use evaluateJavascript for better reliability and error handling
+            val pauseScript = """
+                (function() {
+                    // Try multiple selectors for the pause button
+                    var pauseButton = document.querySelector('.ytp-play-button') ||
+                                      document.querySelector('.ytp-play-btn') ||
+                                      document.querySelector('button[aria-label*="Pause"]') ||
+                                      document.querySelector('button[aria-label*="pause"]') ||
+                                      document.querySelector('.html5-video-player button[data-title*="Pause"]');
+                    
+                    if (pauseButton) {
+                        pauseButton.click();
+                        return 'Pause button clicked';
+                    }
+                    
+                    // Fallback: try to pause video directly
+                    var video = document.querySelector('video');
+                    if (video && !video.paused) {
+                        video.pause();
+                        return 'Video pause() called';
+                    }
+                    
+                    return 'No pause control found';
+                })()
+            """.trimIndent()
+            
+            webView.evaluateJavascript(pauseScript) { result ->
+                DebugLogger.d("PlayerController", "Video $index pause result: $result")
+            }
         }
     }
 
@@ -704,12 +752,22 @@ class PlayerControllerImpl : PlayerController {
         DebugLogger.i("PlayerController", "seekAll() called - position: ${positionMs}ms, ${players.size} players")
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Seeking player $index to ${positionMs}ms")
-            // Inject JavaScript to seek to position
+            // Use evaluateJavascript with direct video element manipulation
             val positionSeconds = positionMs / 1000f
-            webView.loadUrl("javascript:(function() { " +
-                "var video = document.querySelector('video'); " +
-                "if (video) video.currentTime = $positionSeconds; " +
-                "})()")
+            val seekScript = """
+                (function() {
+                    var video = document.querySelector('video');
+                    if (video) {
+                        video.currentTime = $positionSeconds;
+                        return 'Seeked to $positionSeconds seconds';
+                    }
+                    return 'No video element found';
+                })()
+            """.trimIndent()
+            
+            webView.evaluateJavascript(seekScript) { result ->
+                DebugLogger.d("PlayerController", "Video $index seek result: $result")
+            }
         }
     }
 
