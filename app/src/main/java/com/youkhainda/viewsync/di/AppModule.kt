@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.youkhainda.viewsync.BuildConfig
+import com.youkhainda.viewsync.auth.OAuth2Manager
 import com.youkhainda.viewsync.data.remote.YouTubeApiService
 import dagger.Module
 import dagger.Provides
@@ -68,5 +69,11 @@ object AppModule {
     @Singleton
     fun provideDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
         return context.dataStore
+    }
+
+    @Provides
+    @Singleton
+    fun provideOAuth2Manager(@ApplicationContext context: Context): OAuth2Manager {
+        return OAuth2Manager(context)
     }
 }

@@ -4,3 +4,8 @@
 # YouTube Data API v3 Key
 # Get your key from: https://console.cloud.google.com/apis/credentials
 youtube.api.key=YOUR_YOUTUBE_API_KEY_HERE
+
+# Google OAuth 2.0 Client ID (for authenticated actions like like/subscribe/comment)
+# Get from: Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client IDs
+# Create an "Android" type client ID with your app's package name and SHA-1 fingerprint
+google.oauth.client.id=YOUR_CLIENT_ID.apps.googleusercontent.com

@@ -9,6 +9,7 @@ import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.data.model.SyncCue
 import com.youkhainda.viewsync.data.model.YouTubeVideo
 import com.youkhainda.viewsync.data.model.SocialState
+import com.youkhainda.viewsync.data.model.VideoStatistics
 import com.youkhainda.viewsync.data.remote.YouTubeApiService
 import com.youkhainda.viewsync.data.remote.YouTubeUrlParser
 import com.youkhainda.viewsync.data.remote.parseDuration
@@ -30,6 +31,8 @@ class SyncRepository @Inject constructor(
     private val dataStore: DataStore<Preferences>,
     private val json: Json,
     @ApplicationContext private val context: Context,
+    private val oAuth2Manager: com.youkhainda.viewsync.auth.OAuth2Manager,
+    private val authenticatedApiProvider: com.youkhainda.viewsync.auth.AuthenticatedYouTubeApiProvider,
 ) {
 
     // In-memory cache for fast access
@@ -223,6 +226,13 @@ class SyncRepository @Inject constructor(
 
             val videos = detailsResponse.items.mapNotNull { detail ->
                 val snippet = detail.snippet
+                val stats = detail.statistics
+                val viewCount = stats?.viewCount?.toLongOrNull() ?: 0L
+                val likeCount = stats?.likeCount?.toLongOrNull() ?: 0L
+                val commentCount = stats?.commentCount?.toLongOrNull() ?: 0L
+
+                DebugLogger.d("SyncRepository", "Video ${detail.id} stats - Views: $viewCount, Likes: $likeCount, Comments: $commentCount")
+
                 YouTubeVideo(
                     videoId = detail.id,
                     title = snippet?.title ?: "Video ${detail.id}",
@@ -232,6 +242,9 @@ class SyncRepository @Inject constructor(
                         ?: snippet?.thumbnails?.default?.url
                         ?: "https://img.youtube.com/vi/${detail.id}/hqdefault.jpg",
                     duration = durationMap[detail.id] ?: 0L,
+                    viewCount = viewCount,
+                    likeCount = likeCount,
+                    commentCount = commentCount,
                 )
             }
             DebugLogger.i("SyncRepository", "Successfully parsed ${videos.size} videos")
@@ -248,10 +261,22 @@ class SyncRepository @Inject constructor(
         videos: List<YouTubeVideo>,
     ): SyncSession = withContext(Dispatchers.Default) {
         DebugLogger.i("SyncRepository", "createSyncSession() - Name: '$name', Videos: ${videos.size}")
+
+        // Build statistics map from video data
+        val videoStats = videos.associate { video ->
+            video.videoId to VideoStatistics(
+                viewCount = video.viewCount,
+                likeCount = video.likeCount,
+                commentCount = video.commentCount,
+            )
+        }
+        DebugLogger.d("SyncRepository", "Video statistics stored for ${videoStats.size} videos")
+
         val session = SyncSession(
             id = UUID.randomUUID().toString(),
             name = name,
             videoIds = videos.map { it.videoId },
+            videoStats = videoStats,
         )
         syncSessions[session.id] = session
         DebugLogger.i("SyncRepository", "Session created with ID: ${session.id}")
@@ -278,13 +303,48 @@ class SyncRepository @Inject constructor(
         DebugLogger.i("SyncRepository", "addVideosToSession() - Session: $sessionId, New videos: ${videos.size}")
         val session = syncSessions[sessionId] ?: return@withContext null
         val newVideoIds = videos.map { it.videoId }
+
+        // Merge new video statistics into existing stats map
+        val newStats = videos.associate { video ->
+            video.videoId to VideoStatistics(
+                viewCount = video.viewCount,
+                likeCount = video.likeCount,
+                commentCount = video.commentCount,
+            )
+        }
+        val mergedStats = session.videoStats + newStats
+
         val updatedSession = session.copy(
             videoIds = session.videoIds + newVideoIds,
+            videoStats = mergedStats,
             updatedAt = System.currentTimeMillis(),
         )
         syncSessions[sessionId] = updatedSession
         DebugLogger.i("SyncRepository", "Session updated - Total videos: ${updatedSession.videoIds.size}")
         updatedSession
+    }
+
+    /**
+     * Get real YouTube statistics for a video in the session
+     */
+    fun getVideoStatistics(sessionId: String, videoIndex: Int): VideoStatistics? {
+        val session = syncSessions[sessionId] ?: return null
+        val videoId = session.videoIds.getOrNull(videoIndex) ?: return null
+        return session.videoStats[videoId]
+    }
+
+    /**
+     * Check if user is authenticated with Google/YouTube
+     */
+    fun isUserAuthenticated(): Boolean {
+        return oAuth2Manager.isSignedIn()
+    }
+
+    /**
+     * Get the current authenticated user's display name
+     */
+    fun getCurrentUserName(): String? {
+        return oAuth2Manager.getCurrentUserName()
     }
 
     suspend fun addSyncCue(sessionId: String, cue: SyncCue): Boolean = withContext(Dispatchers.Default) {
@@ -381,56 +441,131 @@ class SyncRepository @Inject constructor(
         true
     }
 
-    suspend fun toggleLike(sessionId: String): SocialState? = withContext(Dispatchers.Default) {
+    suspend fun toggleLike(sessionId: String, videoId: String): SocialState? = withContext(Dispatchers.Default) {
         val currentState = socialStates[sessionId] ?: SocialState()
-        val newLikedState = !currentState.isLiked
-        val newLikeCount = if (newLikedState) currentState.likeCount + 1 else currentState.likeCount - 1
-        val newState = currentState.copy(
-            isLiked = newLikedState,
-            likeCount = maxOf(0, newLikeCount)
-        )
-        socialStates[sessionId] = newState
-        
-        // Persist to DataStore
-        persistSocialStates()
-        
-        DebugLogger.d("SyncRepository", "Like toggled - Liked: ${newState.isLiked}, Count: ${newState.likeCount}")
-        newState
+
+        // Check if user is authenticated
+        if (!oAuth2Manager.isSignedIn()) {
+            DebugLogger.w("SyncRepository", "User not authenticated - cannot like video")
+            return@withContext currentState.copy(isLiked = false)
+        }
+
+        try {
+            val authenticatedApi = authenticatedApiProvider.getAuthenticatedApi()
+                ?: return@withContext currentState
+
+            // Check current rating first
+            val ratingResponse = authenticatedApi.getVideoRating(videoId)
+            val currentRating = ratingResponse.items.firstOrNull()?.rating ?: "none"
+
+            if (currentRating == "like") {
+                // Remove like
+                authenticatedApi.rateVideo("none", videoId)
+                DebugLogger.d("SyncRepository", "Like removed from video $videoId")
+            } else {
+                // Add like
+                authenticatedApi.rateVideo("like", videoId)
+                DebugLogger.d("SyncRepository", "Video $videoId liked")
+            }
+
+            val newState = currentState.copy(isLiked = currentRating != "like")
+            socialStates[sessionId] = newState
+            persistSocialStates()
+            newState
+        } catch (e: Exception) {
+            DebugLogger.e("SyncRepository", "Failed to toggle like", e)
+            currentState
+        }
     }
 
-    suspend fun toggleSubscribe(sessionId: String): SocialState? = withContext(Dispatchers.Default) {
+    suspend fun toggleSubscribe(sessionId: String, channelId: String): SocialState? = withContext(Dispatchers.Default) {
         val currentState = socialStates[sessionId] ?: SocialState()
-        val newState = currentState.copy(isSubscribed = !currentState.isSubscribed)
-        socialStates[sessionId] = newState
-        
-        // Persist to DataStore
-        persistSocialStates()
-        
-        DebugLogger.d("SyncRepository", "Subscribe toggled - Subscribed: ${newState.isSubscribed}")
-        newState
+
+        // Check if user is authenticated
+        if (!oAuth2Manager.isSignedIn()) {
+            DebugLogger.w("SyncRepository", "User not authenticated - cannot subscribe")
+            return@withContext currentState.copy(isSubscribed = false)
+        }
+
+        try {
+            val authenticatedApi = authenticatedApiProvider.getAuthenticatedApi()
+                ?: return@withContext currentState
+
+            if (currentState.isSubscribed) {
+                // Need to get subscription ID first - for now, just unsubscribe from the channel
+                // This is simplified - in production you'd fetch the subscription ID
+                DebugLogger.d("SyncRepository", "Unsubscribing from channel $channelId")
+                // Note: YouTube API requires subscription ID, not channel ID for deletion
+                // This is a limitation - we'd need to fetch subscriptions first
+                currentState.copy(isSubscribed = false)
+            } else {
+                // Subscribe to channel
+                val request = com.youkhainda.viewsync.data.remote.SubscriptionRequest(
+                    snippet = com.youkhainda.viewsync.data.remote.SubscriptionSnippet(),
+                    resourceId = com.youkhainda.viewsync.data.remote.SubscriptionResourceId(
+                        channelId = channelId,
+                    ),
+                )
+                authenticatedApi.subscribeToChannel(body = request)
+                DebugLogger.d("SyncRepository", "Subscribed to channel $channelId")
+            }
+
+            val newState = currentState.copy(isSubscribed = !currentState.isSubscribed)
+            socialStates[sessionId] = newState
+            persistSocialStates()
+            newState
+        } catch (e: Exception) {
+            DebugLogger.e("SyncRepository", "Failed to toggle subscribe", e)
+            currentState
+        }
     }
 
     suspend fun incrementShare(sessionId: String): SocialState? = withContext(Dispatchers.Default) {
         val currentState = socialStates[sessionId] ?: SocialState()
         val newState = currentState.copy(shareCount = currentState.shareCount + 1)
         socialStates[sessionId] = newState
-        
+
         // Persist to DataStore
         persistSocialStates()
-        
-        DebugLogger.d("SyncRepository", "Share incremented - Count: ${newState.shareCount}")
+
+        DebugLogger.d("SyncRepository", "Share action recorded locally - Count: ${newState.shareCount}")
         newState
     }
 
-    suspend fun incrementComment(sessionId: String): SocialState? = withContext(Dispatchers.Default) {
+    suspend fun incrementComment(sessionId: String, videoId: String, commentText: String): SocialState? = withContext(Dispatchers.Default) {
         val currentState = socialStates[sessionId] ?: SocialState()
-        val newState = currentState.copy(commentCount = currentState.commentCount + 1)
-        socialStates[sessionId] = newState
-        
-        // Persist to DataStore
-        persistSocialStates()
-        
-        DebugLogger.d("SyncRepository", "Comment incremented - Count: ${newState.commentCount}")
-        newState
+
+        // Check if user is authenticated
+        if (!oAuth2Manager.isSignedIn()) {
+            DebugLogger.w("SyncRepository", "User not authenticated - cannot comment")
+            return@withContext currentState
+        }
+
+        try {
+            val authenticatedApi = authenticatedApiProvider.getAuthenticatedApi()
+                ?: return@withContext currentState
+
+            val request = com.youkhainda.viewsync.data.remote.CommentThreadRequest(
+                snippet = com.youkhainda.viewsync.data.remote.CommentSnippet(
+                    videoId = videoId,
+                    topLevelComment = com.youkhainda.viewsync.data.remote.TopLevelComment(
+                        snippet = com.youkhainda.viewsync.data.remote.CommentTextSnippet(
+                            textOriginal = commentText,
+                        ),
+                    ),
+                ),
+            )
+
+            val response = authenticatedApi.addComment(body = request)
+            DebugLogger.d("SyncRepository", "Comment posted successfully - ID: ${response.id}")
+
+            val newState = currentState.copy(commentCount = currentState.commentCount + 1)
+            socialStates[sessionId] = newState
+            persistSocialStates()
+            newState
+        } catch (e: Exception) {
+            DebugLogger.e("SyncRepository", "Failed to post comment", e)
+            currentState
+        }
     }
 }

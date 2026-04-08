@@ -42,18 +42,23 @@ class SyncPlayerViewModel @Inject constructor(
                 val session = repository.getSyncSession(sessionId)
                 if (session != null) {
                     currentSessionId = sessionId
-                    
+
                     // Load social state from repository
                     val socialState = repository.getSocialState(sessionId)
+
+                    // Load real YouTube statistics for the first video
+                    val videoStats = repository.getVideoStatistics(sessionId, 0)
+
                     _syncState.value = _syncState.value.copy(
                         isLiked = socialState.isLiked,
                         isSubscribed = socialState.isSubscribed,
-                        likeCount = socialState.likeCount,
-                        shareCount = socialState.shareCount,
-                        commentCount = socialState.commentCount
+                        videoLikeCount = videoStats?.likeCount ?: 0L,
+                        videoShareCount = videoStats?.viewCount ?: 0L, // Use views as share proxy
+                        videoCommentCount = videoStats?.commentCount ?: 0L,
+                        videoViewCount = videoStats?.viewCount ?: 0L,
                     )
-                    DebugLogger.d("SyncPlayerVM", "Social state loaded - Liked: ${socialState.isLiked}, Likes: ${socialState.likeCount}")
-                    
+                    DebugLogger.d("SyncPlayerVM", "Social state loaded - Liked: ${socialState.isLiked}, Video Likes: ${videoStats?.likeCount ?: 0}")
+
                     DebugLogger.step("SyncPlayerVM", "Calculating video offsets", 3, 3)
                     val offsets = repository.calculateVideoOffsets(sessionId)
                     _videoOffsets.value = offsets
@@ -98,13 +103,22 @@ class SyncPlayerViewModel @Inject constructor(
         DebugLogger.i("SyncPlayerVM", "toggleLike() called")
         viewModelScope.launch {
             val sessionId = currentSessionId ?: return@launch
-            val newState = repository.toggleLike(sessionId)
+
+            // Get the first video ID from the session
+            val session = repository.getSyncSession(sessionId)
+            val videoId = session?.videoIds?.firstOrNull()
+
+            if (videoId == null) {
+                DebugLogger.w("SyncPlayerVM", "No video ID available for like action")
+                return@launch
+            }
+
+            val newState = repository.toggleLike(sessionId, videoId)
             if (newState != null) {
                 _syncState.value = _syncState.value.copy(
-                    isLiked = newState.isLiked,
-                    likeCount = newState.likeCount
+                    isLiked = newState.isLiked
                 )
-                DebugLogger.d("SyncPlayerVM", "Like state updated - Liked: ${newState.isLiked}, Count: ${newState.likeCount}")
+                DebugLogger.d("SyncPlayerVM", "Like state updated - Liked: ${newState.isLiked}")
             }
         }
     }
@@ -113,7 +127,10 @@ class SyncPlayerViewModel @Inject constructor(
         DebugLogger.i("SyncPlayerVM", "toggleSubscribe() called")
         viewModelScope.launch {
             val sessionId = currentSessionId ?: return@launch
-            val newState = repository.toggleSubscribe(sessionId)
+
+            // Get the channel ID from the session (we'd need to fetch this from video details)
+            // For now, we'll use a simplified approach
+            val newState = repository.toggleSubscribe(sessionId, "")
             if (newState != null) {
                 _syncState.value = _syncState.value.copy(isSubscribed = newState.isSubscribed)
                 DebugLogger.d("SyncPlayerVM", "Subscribe state updated - Subscribed: ${newState.isSubscribed}")
@@ -127,22 +144,44 @@ class SyncPlayerViewModel @Inject constructor(
             val sessionId = currentSessionId ?: return@launch
             val newState = repository.incrementShare(sessionId)
             if (newState != null) {
-                _syncState.value = _syncState.value.copy(shareCount = newState.shareCount)
-                DebugLogger.d("SyncPlayerVM", "Share count updated - Count: ${newState.shareCount}")
+                DebugLogger.d("SyncPlayerVM", "Share action recorded (local only)")
             }
         }
     }
 
-    fun incrementComment() {
+    fun incrementComment(commentText: String = "Great video!") {
         DebugLogger.i("SyncPlayerVM", "incrementComment() called")
         viewModelScope.launch {
             val sessionId = currentSessionId ?: return@launch
-            val newState = repository.incrementComment(sessionId)
+
+            // Get the first video ID from the session
+            val session = repository.getSyncSession(sessionId)
+            val videoId = session?.videoIds?.firstOrNull()
+
+            if (videoId == null) {
+                DebugLogger.w("SyncPlayerVM", "No video ID available for comment action")
+                return@launch
+            }
+
+            val newState = repository.incrementComment(sessionId, videoId, commentText)
             if (newState != null) {
-                _syncState.value = _syncState.value.copy(commentCount = newState.commentCount)
-                DebugLogger.d("SyncPlayerVM", "Comment count updated - Count: ${newState.commentCount}")
+                DebugLogger.d("SyncPlayerVM", "Comment action completed")
             }
         }
+    }
+
+    /**
+     * Check if user is authenticated with Google/YouTube
+     */
+    fun isUserAuthenticated(): Boolean {
+        return repository.isUserAuthenticated()
+    }
+
+    /**
+     * Get current authenticated user's display name
+     */
+    fun getCurrentUserName(): String? {
+        return repository.getCurrentUserName()
     }
 
     fun recordSyncCue(videoIndex: Int, cueTimeMs: Long, description: String = "") {

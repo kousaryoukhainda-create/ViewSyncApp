@@ -9,6 +9,9 @@ data class YouTubeVideo(
     val channelTitle: String,
     val thumbnailUrl: String,
     val duration: Long = 0L, // in seconds
+    val viewCount: Long = 0L,
+    val likeCount: Long = 0L,
+    val commentCount: Long = 0L,
 )
 
 @Serializable
@@ -17,8 +20,16 @@ data class SyncSession(
     val name: String,
     val videoIds: List<String> = emptyList(),
     val syncCues: List<SyncCue> = emptyList(),
+    val videoStats: Map<String, VideoStatistics> = emptyMap(), // videoId -> statistics
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+)
+
+@Serializable
+data class VideoStatistics(
+    val viewCount: Long = 0L,
+    val likeCount: Long = 0L,
+    val commentCount: Long = 0L,
 )
 
 @Serializable
@@ -35,11 +46,14 @@ data class SyncState(
     val videoDuration: Long = 0L,
     val isPlaying: Boolean = false,
     val videoOffsets: Map<Int, Long> = emptyMap(), // video index -> offset in ms
+    // User social actions (local only, not synced with YouTube)
     val isLiked: Boolean = false,
     val isSubscribed: Boolean = false,
-    val likeCount: Int = 0,
-    val shareCount: Int = 0,
-    val commentCount: Int = 0,
+    // Real YouTube statistics (from YouTube API)
+    val videoLikeCount: Long = 0L,
+    val videoShareCount: Long = 0L,
+    val videoCommentCount: Long = 0L,
+    val videoViewCount: Long = 0L,
 )
 
 @Serializable
@@ -99,6 +113,14 @@ data class YouTubeVideoDetails(
     val id: String,
     val snippet: YouTubeSnippet? = null,
     val contentDetails: YouTubeContentDetails,
+    val statistics: YouTubeStatistics? = null,
+)
+
+@Serializable
+data class YouTubeStatistics(
+    val viewCount: String = "0",
+    val likeCount: String = "0",
+    val commentCount: String = "0",
 )
 
 @Serializable

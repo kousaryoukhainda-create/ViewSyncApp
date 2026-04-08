@@ -42,6 +42,47 @@ import kotlinx.coroutines.cancel
 import org.json.JSONObject
 
 /**
+ * Banner that prompts user to sign in with Google.
+ * Shown when the user is not authenticated for social actions.
+ */
+@Composable
+private fun GoogleSignInBanner(onSignInClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Sign in to YouTube",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Text(
+                    text = "Enable real likes, subscribes, and comments",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+            Button(
+                onClick = onSignInClick,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                ),
+            ) {
+                Text("Sign In")
+            }
+        }
+    }
+}
+
+/**
  * Interface to control YouTube players across all video cards
  */
 interface PlayerController {
@@ -68,6 +109,7 @@ fun SyncPlayerScreen(
     sessionId: String,
     viewModel: SyncPlayerViewModel = hiltViewModel(),
     onAddVideo: () -> Unit = {},
+    onSignInRequired: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
@@ -94,23 +136,35 @@ fun SyncPlayerScreen(
 
             is SyncPlayerUiState.Success -> {
                 DebugLogger.i("SyncPlayerScreen", "UI State: Success - Session: ${state.session.name}, Videos: ${state.session.videoIds.size}, Sync Cues: ${state.session.syncCues.size}")
-                SyncPlayerContent(
-                    session = state.session,
-                    shareLink = state.shareLink,
-                    syncState = syncState,
-                    videoOffsets = videoOffsets,
-                    onPlay = { viewModel.play() },
-                    onPause = { viewModel.pause() },
-                    onSeek = { viewModel.seekToPosition(it) },
-                    onUpdatePlaybackState = { pos, dur -> viewModel.updatePlaybackState(pos, dur) },
-                    onRecordCue = { videoIdx, time, desc -> viewModel.recordSyncCue(videoIdx, time, desc) },
-                    onGenerateLink = { viewModel.generateShareLink() },
-                    onAddVideo = onAddVideo,
-                    onToggleLike = { viewModel.toggleLike() },
-                    onToggleSubscribe = { viewModel.toggleSubscribe() },
-                    onIncrementShare = { viewModel.incrementShare() },
-                    onIncrementComment = { viewModel.incrementComment() },
-                )
+
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Google Sign-In Banner (if not authenticated)
+                    if (!viewModel.isUserAuthenticated()) {
+                        GoogleSignInBanner(
+                            onSignInClick = onSignInRequired,
+                        )
+                    }
+
+                    SyncPlayerContent(
+                        session = state.session,
+                        shareLink = state.shareLink,
+                        syncState = syncState,
+                        videoOffsets = videoOffsets,
+                        isAuthenticated = viewModel.isUserAuthenticated(),
+                        userName = viewModel.getCurrentUserName(),
+                        onPlay = { viewModel.play() },
+                        onPause = { viewModel.pause() },
+                        onSeek = { viewModel.seekToPosition(it) },
+                        onUpdatePlaybackState = { pos, dur -> viewModel.updatePlaybackState(pos, dur) },
+                        onRecordCue = { videoIdx, time, desc -> viewModel.recordSyncCue(videoIdx, time, desc) },
+                        onGenerateLink = { viewModel.generateShareLink() },
+                        onAddVideo = onAddVideo,
+                        onToggleLike = { viewModel.toggleLike() },
+                        onToggleSubscribe = { viewModel.toggleSubscribe() },
+                        onIncrementShare = { viewModel.incrementShare() },
+                        onIncrementComment = { viewModel.incrementComment() },
+                    )
+                }
             }
 
             is SyncPlayerUiState.Error -> {
@@ -142,6 +196,8 @@ private fun SyncPlayerContent(
     shareLink: String,
     syncState: com.youkhainda.viewsync.data.model.SyncState,
     videoOffsets: Map<Int, Long>,
+    isAuthenticated: Boolean,
+    userName: String?,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -191,6 +247,14 @@ private fun SyncPlayerContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
                     )
+                    // Show auth status
+                    if (isAuthenticated && userName != null) {
+                        Text(
+                            text = "Signed in as: $userName",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                        )
+                    }
                 }
 
                 IconButton(
@@ -260,9 +324,11 @@ private fun SyncPlayerContent(
             duration = syncState.videoDuration,
             isLiked = syncState.isLiked,
             isSubscribed = syncState.isSubscribed,
-            likeCount = syncState.likeCount,
-            shareCount = syncState.shareCount,
-            commentCount = syncState.commentCount,
+            videoLikeCount = syncState.videoLikeCount,
+            videoShareCount = syncState.videoShareCount,
+            videoCommentCount = syncState.videoCommentCount,
+            videoViewCount = syncState.videoViewCount,
+            isAuthenticated = isAuthenticated,
             onPlay = {
                 playerController.playAll()
                 onPlay()
@@ -453,9 +519,11 @@ private fun PlaybackControlsSection(
     duration: Long,
     isLiked: Boolean,
     isSubscribed: Boolean,
-    likeCount: Int,
-    shareCount: Int,
-    commentCount: Int,
+    videoLikeCount: Long,
+    videoShareCount: Long,
+    videoCommentCount: Long,
+    videoViewCount: Long,
+    isAuthenticated: Boolean,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -550,38 +618,42 @@ private fun PlaybackControlsSection(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Like button
+                // Like button - shows real YouTube like count
                 ActionButtonWithCount(
                     icon = Icons.Default.Favorite,
-                    count = likeCount,
+                    count = videoLikeCount,
                     isActive = isLiked,
                     activeColor = MaterialTheme.colorScheme.primary,
                     onClick = onToggleLike,
                     label = "Like",
+                    enabled = isAuthenticated,
                 )
 
-                // Share button
+                // Share button - shows view count as proxy
                 ActionButtonWithCount(
                     icon = Icons.Default.Share,
-                    count = shareCount,
+                    count = videoViewCount,
                     isActive = false,
                     onClick = onIncrementShare,
-                    label = "Share",
+                    label = "Views",
+                    enabled = true, // Views is always enabled (local only)
                 )
 
-                // Comment button
+                // Comment button - shows real YouTube comment count
                 ActionButtonWithCount(
                     icon = Icons.Default.Comment,
-                    count = commentCount,
+                    count = videoCommentCount,
                     isActive = false,
                     onClick = onIncrementComment,
-                    label = "Comment",
+                    label = "Comments",
+                    enabled = isAuthenticated,
                 )
 
                 // Subscribe button
                 SubscribeButton(
                     isSubscribed = isSubscribed,
                     onClick = onToggleSubscribe,
+                    enabled = isAuthenticated,
                 )
             }
         }
@@ -663,11 +735,12 @@ private fun ShareSection(
 @Composable
 private fun ActionButtonWithCount(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    count: Int,
+    count: Long,
     isActive: Boolean,
     activeColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.error,
     onClick: () -> Unit,
     label: String,
+    enabled: Boolean = true,
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -676,11 +749,18 @@ private fun ActionButtonWithCount(
         IconButton(
             onClick = onClick,
             modifier = Modifier.size(48.dp),
+            enabled = enabled,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (isActive) activeColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (!enabled) {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                } else if (isActive) {
+                    activeColor
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 modifier = Modifier.size(24.dp),
             )
         }
@@ -690,16 +770,26 @@ private fun ActionButtonWithCount(
         ) {
             if (count > 0) {
                 Text(
-                    text = if (count >= 1000) "${count / 1000}k" else count.toString(),
+                    text = formatCount(count),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isActive) activeColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (!enabled) {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                    } else if (isActive) {
+                        activeColor
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         }
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (!enabled) {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
         )
     }
 }
@@ -708,6 +798,7 @@ private fun ActionButtonWithCount(
 private fun SubscribeButton(
     isSubscribed: Boolean,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -715,8 +806,11 @@ private fun SubscribeButton(
     ) {
         Button(
             onClick = onClick,
+            enabled = enabled,
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (isSubscribed) {
+                containerColor = if (!enabled) {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                } else if (isSubscribed) {
                     MaterialTheme.colorScheme.surfaceVariant
                 } else {
                     MaterialTheme.colorScheme.error
@@ -809,15 +903,27 @@ private fun formatTime(milliseconds: Long): String {
     }
 }
 
+/**
+ * Formats large counts with k/M suffixes for display
+ */
+private fun formatCount(count: Long): String {
+    return when {
+        count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000.0)
+        count >= 10_000 -> String.format("%.0fk", count / 1_000.0)
+        count >= 1_000 -> String.format("%.1fk", count / 1_000.0)
+        else -> count.toString()
+    }
+}
+
 private fun dpToPx(dp: Int): Int {
     return (dp * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
 }
 
 /**
- * DirectYouTubeWebView - WebView that loads YouTube videos directly to bypass embedding restrictions
- * 
- * This loads the full YouTube watch page instead of using the embed player,
- * which avoids embedding restrictions set by video owners.
+ * DirectYouTubeWebView - WebView that loads YouTube videos using the IFrame Player API
+ *
+ * This uses the official YouTube IFrame Player API which provides reliable
+ * JavaScript methods for playback control (playVideo, pauseVideo, seekTo, etc.)
  */
 @Composable
 private fun DirectYouTubeWebView(
@@ -828,9 +934,123 @@ private fun DirectYouTubeWebView(
     onError: () -> Unit,
 ) {
     val context = LocalContext.current
-    
+
     DebugLogger.i("DirectYouTubeWebView", "Video: Initializing - ID: $videoId, Offset: ${offset}ms")
-    
+
+    // Create the HTML page with YouTube IFrame Player API
+    val htmlContent = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+                #player { width: 100%; height: 200px; }
+            </style>
+        </head>
+        <body>
+            <div id="player"></div>
+            <script>
+                var player;
+                var isReady = false;
+                
+                // Load YouTube IFrame API
+                var tag = document.createElement('script');
+                tag.src = "https://www.youtube.com/iframe_api";
+                var firstScriptTag = document.getElementsByTagName('script')[0];
+                firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                
+                function onYouTubeIframeAPIReady() {
+                    player = new YT.Player('player', {
+                        height: '200',
+                        width: '100%',
+                        videoId: '$videoId',
+                        playerVars: {
+                            'playsinline': 1,
+                            'controls': 1,
+                            'rel': 0,
+                            'modestbranding': 1,
+                            'enablejsapi': 1
+                        },
+                        events: {
+                            'onReady': onPlayerReady,
+                            'onStateChange': onPlayerStateChange,
+                            'onError': onPlayerError
+                        }
+                    });
+                }
+                
+                function onPlayerReady(event) {
+                    isReady = true;
+                    window.onPlayerReady && window.onPlayerReady();
+                }
+                
+                function onPlayerStateChange(event) {
+                    var state = {
+                        state: event.data,
+                        currentTime: player.getCurrentTime(),
+                        duration: player.getDuration()
+                    };
+                    window.onStateChange && window.onStateChange(JSON.stringify(state));
+                }
+                
+                function onPlayerError(event) {
+                    window.onError && window.onError(event.data);
+                }
+                
+                // Expose player methods to Android
+                window.playVideo = function() {
+                    if (player && player.playVideo) {
+                        player.playVideo();
+                        return 'played';
+                    }
+                    return 'not_ready';
+                };
+                
+                window.pauseVideo = function() {
+                    if (player && player.pauseVideo) {
+                        player.pauseVideo();
+                        return 'paused';
+                    }
+                    return 'not_ready';
+                };
+                
+                window.seekTo = function(seconds) {
+                    if (player && player.seekTo) {
+                        player.seekTo(seconds, true);
+                        return 'seeked';
+                    }
+                    return 'not_ready';
+                };
+                
+                window.getCurrentTime = function() {
+                    if (player && player.getCurrentTime) {
+                        return player.getCurrentTime();
+                    }
+                    return 0;
+                };
+                
+                window.getDuration = function() {
+                    if (player && player.getDuration) {
+                        return player.getDuration();
+                    }
+                    return 0;
+                };
+                
+                window.getPlayerState = function() {
+                    if (player && player.getPlayerState) {
+                        return player.getPlayerState();
+                    }
+                    return -1;
+                };
+                
+                window.isPlayerReady = function() {
+                    return isReady;
+                };
+            </script>
+        </body>
+        </html>
+    """.trimIndent()
+
     AndroidView(
         factory = { ctx ->
             DebugLogger.d("DirectYouTubeWebView", "Video: Creating WebView instance")
@@ -839,7 +1059,7 @@ private fun DirectYouTubeWebView(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     dpToPx(200),
                 )
-                
+
                 // Configure WebView settings for video playback
                 settings.apply {
                     javaScriptEnabled = true
@@ -856,15 +1076,15 @@ private fun DirectYouTubeWebView(
                     loadWithOverviewMode = true
                     DebugLogger.d("DirectYouTubeWebView", "Video: WebView settings configured")
                 }
-                
+
                 // Set WebViewClient to handle page loading
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-                        DebugLogger.d("DirectYouTubeWebView", "Video: Page finished loading: $url")
+                        DebugLogger.d("DirectYouTubeWebView", "Video: HTML wrapper loaded, IFrame API will initialize")
                         onWebViewReady(view ?: return)
                     }
-                    
+
                     override fun onReceivedError(
                         view: WebView?,
                         errorCode: Int,
@@ -876,11 +1096,10 @@ private fun DirectYouTubeWebView(
                         onError()
                     }
                 }
-                
-                // Load YouTube video directly
-                val youtubeUrl = "https://www.youtube.com/watch?v=$videoId"
-                DebugLogger.i("DirectYouTubeWebView", "Video: Loading YouTube URL: $youtubeUrl")
-                loadUrl(youtubeUrl)
+
+                // Load the HTML content with IFrame API
+                DebugLogger.i("DirectYouTubeWebView", "Video: Loading IFrame Player HTML")
+                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
             }
         },
         onRelease = { view ->
@@ -968,21 +1187,23 @@ class PlayerControllerImpl : PlayerController {
     }
 
     /**
-     * Poll a single player for its current state
+     * Poll a single player for its current state using IFrame API
      */
     private suspend fun pollPlayer(index: Int, webView: WebView) {
         val script = """
             (function() {
-                var video = document.querySelector('video');
-                if (video) {
+                if (window.isPlayerReady && window.isPlayerReady()) {
+                    var state = window.getPlayerState();
+                    var currentTime = window.getCurrentTime();
+                    var duration = window.getDuration();
                     JSON.stringify({
-                        currentTime: video.currentTime || 0,
-                        duration: video.duration || 0,
-                        paused: video.paused !== false,
-                        ended: video.ended !== false
+                        currentTime: currentTime || 0,
+                        duration: duration || 0,
+                        paused: state !== 1,
+                        ended: state === 0
                     });
                 } else {
-                    JSON.stringify({error: 'no_video'});
+                    JSON.stringify({error: 'not_ready'});
                 }
             })()
         """.trimIndent()
@@ -1029,24 +1250,11 @@ class PlayerControllerImpl : PlayerController {
             DebugLogger.d("PlayerController", "Playing video $index")
             val playScript = """
                 (function() {
-                    var playButton = document.querySelector('.ytp-play-button') ||
-                                     document.querySelector('.ytp-play-btn') ||
-                                     document.querySelector('button[aria-label*="Play"]') ||
-                                     document.querySelector('button[aria-label*="play"]') ||
-                                     document.querySelector('.html5-video-player button[data-title*="Play"]');
-
-                    if (playButton) {
-                        playButton.click();
-                        return 'Play button clicked';
+                    if (window.playVideo) {
+                        window.playVideo();
+                    } else {
+                        'no_api';
                     }
-
-                    var video = document.querySelector('video');
-                    if (video && video.paused) {
-                        video.play();
-                        return 'Video play() called';
-                    }
-
-                    return 'No play control found';
                 })()
             """.trimIndent()
 
@@ -1062,24 +1270,11 @@ class PlayerControllerImpl : PlayerController {
             DebugLogger.d("PlayerController", "Pausing video $index")
             val pauseScript = """
                 (function() {
-                    var pauseButton = document.querySelector('.ytp-play-button') ||
-                                      document.querySelector('.ytp-play-btn') ||
-                                      document.querySelector('button[aria-label*="Pause"]') ||
-                                      document.querySelector('button[aria-label*="pause"]') ||
-                                      document.querySelector('.html5-video-player button[data-title*="Pause"]');
-
-                    if (pauseButton) {
-                        pauseButton.click();
-                        return 'Pause button clicked';
+                    if (window.pauseVideo) {
+                        window.pauseVideo();
+                    } else {
+                        'no_api';
                     }
-
-                    var video = document.querySelector('video');
-                    if (video && !video.paused) {
-                        video.pause();
-                        return 'Video pause() called';
-                    }
-
-                    return 'No pause control found';
                 })()
             """.trimIndent()
 
@@ -1096,12 +1291,11 @@ class PlayerControllerImpl : PlayerController {
             val positionSeconds = positionMs / 1000f
             val seekScript = """
                 (function() {
-                    var video = document.querySelector('video');
-                    if (video && video.duration > 0) {
-                        video.currentTime = Math.min($positionSeconds, video.duration);
-                        return 'Seeked to $positionSeconds seconds';
+                    if (window.seekTo) {
+                        window.seekTo($positionSeconds);
+                    } else {
+                        'no_api';
                     }
-                    return 'No video element found';
                 })()
             """.trimIndent()
 

@@ -34,6 +34,11 @@ android {
 
         val youtubeApiKey = localProperties.getProperty("youtube.api.key") ?: "YOUR_YOUTUBE_API_KEY"
         buildConfigField("String", "YOUTUBE_API_KEY", "\"$youtubeApiKey\"")
+
+        // OAuth 2.0 Client ID - Get from Google Cloud Console
+        // Format: "YOUR_CLIENT_ID.apps.googleusercontent.com"
+        val oauthClientId = localProperties.getProperty("google.oauth.client.id") ?: ""
+        buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"$oauthClientId\"")
     }
 
     buildTypes {
@@ -116,6 +121,10 @@ dependencies {
 
     // DataStore for preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+
+    // Google Sign-In / OAuth 2.0
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("com.google.auth:google-auth-library-oauth2-http:1.23.0")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
