@@ -534,9 +534,9 @@ private fun VideoPlayerCard(
                     onCurrentSecond = { second ->
                         currentTime = (second * 1000).toLong()
                     },
-                    onError = {
-                        playerError = "Playback error"
-                        DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Player error")
+                    onError = { errorCode ->
+                        playerError = errorCode
+                        DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Player error - Code: $errorCode")
                     },
                 )
             } else {
@@ -1025,7 +1025,7 @@ private fun DirectYouTubeWebView(
     offset: Long,
     onWebViewReady: (WebView, YouTubePlayerInterface) -> Unit,
     onCurrentSecond: (Float) -> Unit,
-    onError: () -> Unit,
+    onError: (Int) -> Unit,
 ) {
     val context = LocalContext.current
 
@@ -1043,7 +1043,7 @@ private fun DirectYouTubeWebView(
             },
             onError = { errorCode ->
                 DebugLogger.e("DirectYouTubeWebView", "Player error - Code: $errorCode")
-                onError()
+                onError(errorCode)
             },
         )
     }
