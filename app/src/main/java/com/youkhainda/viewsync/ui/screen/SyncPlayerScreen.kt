@@ -534,9 +534,9 @@ private fun VideoPlayerCard(
                     onCurrentSecond = { second ->
                         currentTime = (second * 1000).toLong()
                     },
-                    onError = { errorCode ->
-                        playerError = errorCode
-                        DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Player error - Code: $errorCode")
+                    onError = {
+                        playerError = "Playback error"
+                        DebugLogger.e("VideoPlayerCard", "Video $videoIndex: Player error")
                     },
                 )
             } else {
@@ -1260,7 +1260,6 @@ private fun DirectYouTubeWebView(
                     databaseEnabled = true
                     useWideViewPort = true
                     loadWithOverviewMode = true
-                    setAppCacheEnabled(false)
                     javaScriptCanOpenWindowsAutomatically = true
                     DebugLogger.d("DirectYouTubeWebView", "Video: WebView settings configured")
                 }
