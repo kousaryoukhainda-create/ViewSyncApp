@@ -36,6 +36,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.cancel
 import org.json.JSONObject
 
 /**
@@ -99,6 +102,7 @@ fun SyncPlayerScreen(
                     onPlay = { viewModel.play() },
                     onPause = { viewModel.pause() },
                     onSeek = { viewModel.seekToPosition(it) },
+                    onUpdatePlaybackState = { pos, dur -> viewModel.updatePlaybackState(pos, dur) },
                     onRecordCue = { videoIdx, time, desc -> viewModel.recordSyncCue(videoIdx, time, desc) },
                     onGenerateLink = { viewModel.generateShareLink() },
                     onAddVideo = onAddVideo,
@@ -141,6 +145,7 @@ private fun SyncPlayerContent(
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onSeek: (Long) -> Unit,
+    onUpdatePlaybackState: (Long, Long) -> Unit,
     onRecordCue: (Int, Long, String) -> Unit,
     onGenerateLink: () -> Unit,
     onAddVideo: () -> Unit,
@@ -214,16 +219,16 @@ private fun SyncPlayerContent(
                     if (index == 0) {
                         val positionMs = (currentTimeSeconds * 1000).toLong()
                         val durationMs = (durationSeconds * 1000).toLong()
-                        viewModel.updatePlaybackState(positionMs, durationMs)
+                        onUpdatePlaybackState(positionMs, durationMs)
                     }
                 }
 
                 override fun onPlayingChanged(index: Int, isPlaying: Boolean) {
                     // Sync play state from actual player
                     if (isPlaying) {
-                        viewModel.play()
+                        onPlay()
                     } else {
-                        viewModel.pause()
+                        onPause()
                     }
                 }
             }
@@ -927,7 +932,7 @@ class PlayerControllerImpl : PlayerController {
     fun startPolling(intervalMs: Long = 500L) {
         pollingJob?.cancel()
         pollingJob = coroutineScope.launch {
-            while (isActive) {
+            while (currentCoroutineContext().isActive) {
                 pollAllPlayers()
                 delay(intervalMs)
             }
@@ -947,7 +952,7 @@ class PlayerControllerImpl : PlayerController {
      */
     fun cleanup() {
         stopPolling()
-        coroutineScope.cancel()
+        coroutineScope.coroutineContext.cancel()
         players.clear()
         playerStates.clear()
         playbackListener = null
