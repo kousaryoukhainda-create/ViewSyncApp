@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.youkhainda.viewsync.data.model.SyncSession
 import com.youkhainda.viewsync.data.model.SyncCue
 import com.youkhainda.viewsync.data.model.YouTubeVideo
+import com.youkhainda.viewsync.data.model.SocialState
 import com.youkhainda.viewsync.data.remote.YouTubeApiService
 import com.youkhainda.viewsync.data.remote.YouTubeUrlParser
 import com.youkhainda.viewsync.data.remote.parseDuration
@@ -33,12 +34,14 @@ class SyncRepository @Inject constructor(
 
     // In-memory cache for fast access
     private val syncSessions = mutableMapOf<String, SyncSession>()
+    private val socialStates = mutableMapOf<String, SocialState>()
 
     // Track the last active session ID for restoration
     private var lastActiveSessionId: String? = null
 
     // DataStore keys
     private val SESSIONS_KEY = stringPreferencesKey("sync_sessions")
+    private val SOCIAL_STATES_KEY = stringPreferencesKey("social_states")
     private val LAST_ACTIVE_SESSION_KEY = stringPreferencesKey("last_active_session_id")
 
     /**
@@ -60,6 +63,17 @@ class SyncRepository @Inject constructor(
                 DebugLogger.i("SyncRepository", "Loaded ${sessionsList.size} sessions from DataStore")
             } else {
                 DebugLogger.d("SyncRepository", "No sessions found in DataStore")
+            }
+
+            // Load social states
+            val socialStatesJson = preferences[SOCIAL_STATES_KEY]
+            if (socialStatesJson != null) {
+                val socialStatesMap = json.decodeFromString<Map<String, SocialState>>(socialStatesJson)
+                socialStates.clear()
+                socialStates.putAll(socialStatesMap)
+                DebugLogger.i("SyncRepository", "Loaded ${socialStatesMap.size} social states from DataStore")
+            } else {
+                DebugLogger.d("SyncRepository", "No social states found in DataStore")
             }
 
             // Load last active session
@@ -84,6 +98,22 @@ class SyncRepository @Inject constructor(
             DebugLogger.d("SyncRepository", "Persisted ${sessionsList.size} sessions to DataStore")
         } catch (e: Exception) {
             DebugLogger.e("SyncRepository", "Failed to persist sessions", e)
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Persists all social states to DataStore
+     */
+    private suspend fun persistSocialStates() = withContext(Dispatchers.IO) {
+        try {
+            val socialStatesJson = json.encodeToString(socialStates)
+            dataStore.edit { preferences ->
+                preferences[SOCIAL_STATES_KEY] = socialStatesJson
+            }
+            DebugLogger.d("SyncRepository", "Persisted ${socialStates.size} social states to DataStore")
+        } catch (e: Exception) {
+            DebugLogger.e("SyncRepository", "Failed to persist social states", e)
             e.printStackTrace()
         }
     }
@@ -334,5 +364,73 @@ class SyncRepository @Inject constructor(
         }
         DebugLogger.i("SyncRepository", "Offsets calculated: $offsets")
         offsets
+    }
+
+    // Social state management
+    fun getSocialState(sessionId: String): SocialState {
+        return socialStates[sessionId] ?: SocialState()
+    }
+
+    suspend fun updateSocialState(sessionId: String, state: SocialState): Boolean = withContext(Dispatchers.Default) {
+        DebugLogger.i("SyncRepository", "updateSocialState() - Session: $sessionId")
+        socialStates[sessionId] = state
+        DebugLogger.d("SyncRepository", "Social state updated - Liked: ${state.isLiked}, Subscribed: ${state.isSubscribed}")
+        
+        // Persist to DataStore
+        persistSocialStates()
+        true
+    }
+
+    suspend fun toggleLike(sessionId: String): SocialState? = withContext(Dispatchers.Default) {
+        val currentState = socialStates[sessionId] ?: SocialState()
+        val newLikedState = !currentState.isLiked
+        val newLikeCount = if (newLikedState) currentState.likeCount + 1 else currentState.likeCount - 1
+        val newState = currentState.copy(
+            isLiked = newLikedState,
+            likeCount = maxOf(0, newLikeCount)
+        )
+        socialStates[sessionId] = newState
+        
+        // Persist to DataStore
+        persistSocialStates()
+        
+        DebugLogger.d("SyncRepository", "Like toggled - Liked: ${newState.isLiked}, Count: ${newState.likeCount}")
+        newState
+    }
+
+    suspend fun toggleSubscribe(sessionId: String): SocialState? = withContext(Dispatchers.Default) {
+        val currentState = socialStates[sessionId] ?: SocialState()
+        val newState = currentState.copy(isSubscribed = !currentState.isSubscribed)
+        socialStates[sessionId] = newState
+        
+        // Persist to DataStore
+        persistSocialStates()
+        
+        DebugLogger.d("SyncRepository", "Subscribe toggled - Subscribed: ${newState.isSubscribed}")
+        newState
+    }
+
+    suspend fun incrementShare(sessionId: String): SocialState? = withContext(Dispatchers.Default) {
+        val currentState = socialStates[sessionId] ?: SocialState()
+        val newState = currentState.copy(shareCount = currentState.shareCount + 1)
+        socialStates[sessionId] = newState
+        
+        // Persist to DataStore
+        persistSocialStates()
+        
+        DebugLogger.d("SyncRepository", "Share incremented - Count: ${newState.shareCount}")
+        newState
+    }
+
+    suspend fun incrementComment(sessionId: String): SocialState? = withContext(Dispatchers.Default) {
+        val currentState = socialStates[sessionId] ?: SocialState()
+        val newState = currentState.copy(commentCount = currentState.commentCount + 1)
+        socialStates[sessionId] = newState
+        
+        // Persist to DataStore
+        persistSocialStates()
+        
+        DebugLogger.d("SyncRepository", "Comment incremented - Count: ${newState.commentCount}")
+        newState
     }
 }

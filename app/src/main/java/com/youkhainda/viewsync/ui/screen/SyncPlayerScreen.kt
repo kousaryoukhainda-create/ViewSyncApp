@@ -31,6 +31,12 @@ import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerUiState
 import com.youkhainda.viewsync.ui.viewmodel.SyncPlayerViewModel
 import com.youkhainda.viewsync.util.CacheClearingUtil
 import com.youkhainda.viewsync.util.DebugLogger
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import org.json.JSONObject
 
 /**
  * Interface to control YouTube players across all video cards
@@ -41,6 +47,17 @@ interface PlayerController {
     fun seekAll(positionMs: Long)
     fun registerPlayer(index: Int, player: WebView)
     fun unregisterPlayer(index: Int)
+    fun getPlayerTime(index: Int): Float
+    fun isPlayerPlaying(index: Int): Boolean
+    fun setOnPlaybackStateChangeListener(listener: PlaybackStateChangeListener?)
+}
+
+/**
+ * Listener for playback state changes from WebView players
+ */
+interface PlaybackStateChangeListener {
+    fun onTimeUpdate(index: Int, currentTimeSeconds: Float, durationSeconds: Float)
+    fun onPlayingChanged(index: Int, isPlaying: Boolean)
 }
 
 @Composable
@@ -187,7 +204,42 @@ private fun SyncPlayerContent(
 
         // Video Grid
         val playerController = rememberPlayerController()
-        
+        val lifecycleOwner = LocalLifecycleOwner.current
+
+        // Playback state listener to sync time to UI
+        val playbackListener = remember {
+            object : PlaybackStateChangeListener {
+                override fun onTimeUpdate(index: Int, currentTimeSeconds: Float, durationSeconds: Float) {
+                    // Update syncState with current playback position (use first video as master)
+                    if (index == 0) {
+                        val positionMs = (currentTimeSeconds * 1000).toLong()
+                        val durationMs = (durationSeconds * 1000).toLong()
+                        viewModel.updatePlaybackState(positionMs, durationMs)
+                    }
+                }
+
+                override fun onPlayingChanged(index: Int, isPlaying: Boolean) {
+                    // Sync play state from actual player
+                    if (isPlaying) {
+                        viewModel.play()
+                    } else {
+                        viewModel.pause()
+                    }
+                }
+            }
+        }
+
+        // Register playback listener
+        LaunchedEffect(playerController) {
+            playerController.setOnPlaybackStateChangeListener(playbackListener)
+        }
+
+        DisposableEffect(lifecycleOwner, playerController) {
+            onDispose {
+                playerController.setOnPlaybackStateChangeListener(null)
+            }
+        }
+
         LazyVideoGrid(
             videoIds = session.videoIds,
             syncState = syncState,
@@ -200,6 +252,7 @@ private fun SyncPlayerContent(
         PlaybackControlsSection(
             isPlaying = syncState.isPlaying,
             currentPosition = syncState.currentPlayPosition,
+            duration = syncState.videoDuration,
             isLiked = syncState.isLiked,
             isSubscribed = syncState.isSubscribed,
             likeCount = syncState.likeCount,
@@ -392,6 +445,7 @@ private fun VideoPlayerCard(
 private fun PlaybackControlsSection(
     isPlaying: Boolean,
     currentPosition: Long,
+    duration: Long,
     isLiked: Boolean,
     isSubscribed: Boolean,
     likeCount: Int,
@@ -405,6 +459,16 @@ private fun PlaybackControlsSection(
     onIncrementShare: () -> Unit,
     onIncrementComment: () -> Unit,
 ) {
+    var sliderPosition by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    // Update slider when position changes (but not during drag)
+    LaunchedEffect(currentPosition, isDragging) {
+        if (!isDragging && duration > 0) {
+            sliderPosition = (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+        }
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -421,7 +485,44 @@ private fun PlaybackControlsSection(
                 style = MaterialTheme.typography.labelLarge,
             )
 
-            // Play/Pause and time display
+            // Progress slider
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Slider(
+                    value = sliderPosition,
+                    onValueChange = {
+                        isDragging = true
+                        sliderPosition = it
+                    },
+                    onValueChangeFinished = {
+                        isDragging = false
+                        val seekPosition = (sliderPosition * duration).toLong()
+                        onSeek(seekPosition)
+                    },
+                    valueRange = 0f..1f,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = formatTime(currentPosition),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = formatTime(duration),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // Play/Pause button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
@@ -436,14 +537,6 @@ private fun PlaybackControlsSection(
                         contentDescription = if (isPlaying) "Pause" else "Play",
                     )
                 }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Text(
-                    text = formatTime(currentPosition),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.align(Alignment.CenterVertically),
-                )
             }
 
             // Action buttons row
@@ -815,37 +908,143 @@ fun rememberPlayerController(): PlayerController {
  */
 class PlayerControllerImpl : PlayerController {
     private val players = mutableMapOf<Int, WebView>()
+    private val playerStates = mutableMapOf<Int, PlayerState>()
+    private var playbackListener: PlaybackStateChangeListener? = null
+    private var pollingJob: Job? = null
+    private val coroutineScope = kotlinx.coroutines.CoroutineScope(
+        Dispatchers.Main + SupervisorJob()
+    )
+
+    data class PlayerState(
+        val currentTime: Float = 0f,
+        val duration: Float = 0f,
+        val isPlaying: Boolean = false
+    )
+
+    /**
+     * Start polling all players for playback state updates
+     */
+    fun startPolling(intervalMs: Long = 500L) {
+        pollingJob?.cancel()
+        pollingJob = coroutineScope.launch {
+            while (isActive) {
+                pollAllPlayers()
+                delay(intervalMs)
+            }
+        }
+    }
+
+    /**
+     * Stop polling players
+     */
+    fun stopPolling() {
+        pollingJob?.cancel()
+        pollingJob = null
+    }
+
+    /**
+     * Cleanup resources when controller is no longer needed
+     */
+    fun cleanup() {
+        stopPolling()
+        coroutineScope.cancel()
+        players.clear()
+        playerStates.clear()
+        playbackListener = null
+    }
+
+    /**
+     * Poll all players for current playback state
+     */
+    private suspend fun pollAllPlayers() {
+        players.forEach { (index, webView) ->
+            pollPlayer(index, webView)
+        }
+    }
+
+    /**
+     * Poll a single player for its current state
+     */
+    private suspend fun pollPlayer(index: Int, webView: WebView) {
+        val script = """
+            (function() {
+                var video = document.querySelector('video');
+                if (video) {
+                    JSON.stringify({
+                        currentTime: video.currentTime || 0,
+                        duration: video.duration || 0,
+                        paused: video.paused !== false,
+                        ended: video.ended !== false
+                    });
+                } else {
+                    JSON.stringify({error: 'no_video'});
+                }
+            })()
+        """.trimIndent()
+
+        webView.evaluateJavascript(script) { result ->
+            try {
+                if (result != null && result != "null") {
+                    val json = JSONObject(result)
+                    if (!json.has("error")) {
+                        val currentTime = json.optDouble("currentTime", 0.0).toFloat()
+                        val duration = json.optDouble("duration", 0.0).toFloat()
+                        val isPlaying = !json.optBoolean("paused", true)
+                        val isEnded = json.optBoolean("ended", false)
+
+                        val newState = PlayerState(
+                            currentTime = currentTime,
+                            duration = duration,
+                            isPlaying = if (isEnded) false else isPlaying
+                        )
+
+                        val oldState = playerStates[index]
+                        playerStates[index] = newState
+
+                        // Notify listener of time updates
+                        if (duration > 0) {
+                            playbackListener?.onTimeUpdate(index, currentTime, duration)
+                        }
+
+                        // Notify listener of playing state changes
+                        if (oldState?.isPlaying != newState.isPlaying) {
+                            playbackListener?.onPlayingChanged(index, newState.isPlaying)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                DebugLogger.w("PlayerController", "Error parsing state for player $index: ${e.message}")
+            }
+        }
+    }
 
     override fun playAll() {
         DebugLogger.i("PlayerController", "playAll() called - ${players.size} players registered")
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Playing video $index")
-            // Use evaluateJavascript for better reliability and error handling
             val playScript = """
                 (function() {
-                    // Try multiple selectors for the play button
                     var playButton = document.querySelector('.ytp-play-button') ||
                                      document.querySelector('.ytp-play-btn') ||
                                      document.querySelector('button[aria-label*="Play"]') ||
                                      document.querySelector('button[aria-label*="play"]') ||
                                      document.querySelector('.html5-video-player button[data-title*="Play"]');
-                    
+
                     if (playButton) {
                         playButton.click();
                         return 'Play button clicked';
                     }
-                    
-                    // Fallback: try to play video directly
+
                     var video = document.querySelector('video');
                     if (video && video.paused) {
                         video.play();
                         return 'Video play() called';
                     }
-                    
+
                     return 'No play control found';
                 })()
             """.trimIndent()
-            
+
             webView.evaluateJavascript(playScript) { result ->
                 DebugLogger.d("PlayerController", "Video $index play result: $result")
             }
@@ -856,32 +1055,29 @@ class PlayerControllerImpl : PlayerController {
         DebugLogger.i("PlayerController", "pauseAll() called - ${players.size} players registered")
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Pausing video $index")
-            // Use evaluateJavascript for better reliability and error handling
             val pauseScript = """
                 (function() {
-                    // Try multiple selectors for the pause button
                     var pauseButton = document.querySelector('.ytp-play-button') ||
                                       document.querySelector('.ytp-play-btn') ||
                                       document.querySelector('button[aria-label*="Pause"]') ||
                                       document.querySelector('button[aria-label*="pause"]') ||
                                       document.querySelector('.html5-video-player button[data-title*="Pause"]');
-                    
+
                     if (pauseButton) {
                         pauseButton.click();
                         return 'Pause button clicked';
                     }
-                    
-                    // Fallback: try to pause video directly
+
                     var video = document.querySelector('video');
                     if (video && !video.paused) {
                         video.pause();
                         return 'Video pause() called';
                     }
-                    
+
                     return 'No pause control found';
                 })()
             """.trimIndent()
-            
+
             webView.evaluateJavascript(pauseScript) { result ->
                 DebugLogger.d("PlayerController", "Video $index pause result: $result")
             }
@@ -892,32 +1088,55 @@ class PlayerControllerImpl : PlayerController {
         DebugLogger.i("PlayerController", "seekAll() called - position: ${positionMs}ms, ${players.size} players")
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Seeking player $index to ${positionMs}ms")
-            // Use evaluateJavascript with direct video element manipulation
             val positionSeconds = positionMs / 1000f
             val seekScript = """
                 (function() {
                     var video = document.querySelector('video');
-                    if (video) {
-                        video.currentTime = $positionSeconds;
+                    if (video && video.duration > 0) {
+                        video.currentTime = Math.min($positionSeconds, video.duration);
                         return 'Seeked to $positionSeconds seconds';
                     }
                     return 'No video element found';
                 })()
             """.trimIndent()
-            
+
             webView.evaluateJavascript(seekScript) { result ->
                 DebugLogger.d("PlayerController", "Video $index seek result: $result")
             }
         }
     }
 
+    override fun getPlayerTime(index: Int): Float {
+        return playerStates[index]?.currentTime ?: 0f
+    }
+
+    override fun isPlayerPlaying(index: Int): Boolean {
+        return playerStates[index]?.isPlaying ?: false
+    }
+
+    override fun setOnPlaybackStateChangeListener(listener: PlaybackStateChangeListener?) {
+        playbackListener = listener
+    }
+
     override fun registerPlayer(index: Int, player: WebView) {
         players[index] = player
+        playerStates[index] = PlayerState()
         DebugLogger.d("PlayerController", "Player registered at index $index - Total: ${players.size}")
+
+        // Start polling if this is the first player
+        if (players.size == 1) {
+            startPolling()
+        }
     }
 
     override fun unregisterPlayer(index: Int) {
         players.remove(index)
+        playerStates.remove(index)
         DebugLogger.d("PlayerController", "Player unregistered at index $index - Total: ${players.size}")
+
+        // Stop polling if no players left
+        if (players.isEmpty()) {
+            stopPolling()
+        }
     }
 }

@@ -42,10 +42,22 @@ class SyncPlayerViewModel @Inject constructor(
                 val session = repository.getSyncSession(sessionId)
                 if (session != null) {
                     currentSessionId = sessionId
+                    
+                    // Load social state from repository
+                    val socialState = repository.getSocialState(sessionId)
+                    _syncState.value = _syncState.value.copy(
+                        isLiked = socialState.isLiked,
+                        isSubscribed = socialState.isSubscribed,
+                        likeCount = socialState.likeCount,
+                        shareCount = socialState.shareCount,
+                        commentCount = socialState.commentCount
+                    )
+                    DebugLogger.d("SyncPlayerVM", "Social state loaded - Liked: ${socialState.isLiked}, Likes: ${socialState.likeCount}")
+                    
                     DebugLogger.step("SyncPlayerVM", "Calculating video offsets", 3, 3)
                     val offsets = repository.calculateVideoOffsets(sessionId)
                     _videoOffsets.value = offsets
-                    DebugLogger.stepSuccess("SyncPlayerVM", "Session loaded successfully", 
+                    DebugLogger.stepSuccess("SyncPlayerVM", "Session loaded successfully",
                         "Videos: ${session.videoIds.size}, Cues: ${session.syncCues.size}")
                     _uiState.value = SyncPlayerUiState.Success(session)
                 } else {
@@ -74,33 +86,63 @@ class SyncPlayerViewModel @Inject constructor(
         _syncState.value = _syncState.value.copy(currentPlayPosition = positionMs)
     }
 
+    fun updatePlaybackState(positionMs: Long, durationMs: Long) {
+        DebugLogger.d("SyncPlayerVM", "updatePlaybackState() - position: ${positionMs}ms, duration: ${durationMs}ms")
+        _syncState.value = _syncState.value.copy(
+            currentPlayPosition = positionMs,
+            videoDuration = durationMs
+        )
+    }
+
     fun toggleLike() {
         DebugLogger.i("SyncPlayerVM", "toggleLike() called")
-        val currentState = _syncState.value
-        val newLikedState = !currentState.isLiked
-        val newLikeCount = if (newLikedState) currentState.likeCount + 1 else currentState.likeCount - 1
-        _syncState.value = currentState.copy(
-            isLiked = newLikedState,
-            likeCount = maxOf(0, newLikeCount)
-        )
+        viewModelScope.launch {
+            val sessionId = currentSessionId ?: return@launch
+            val newState = repository.toggleLike(sessionId)
+            if (newState != null) {
+                _syncState.value = _syncState.value.copy(
+                    isLiked = newState.isLiked,
+                    likeCount = newState.likeCount
+                )
+                DebugLogger.d("SyncPlayerVM", "Like state updated - Liked: ${newState.isLiked}, Count: ${newState.likeCount}")
+            }
+        }
     }
 
     fun toggleSubscribe() {
         DebugLogger.i("SyncPlayerVM", "toggleSubscribe() called")
-        val currentState = _syncState.value
-        _syncState.value = currentState.copy(isSubscribed = !currentState.isSubscribed)
+        viewModelScope.launch {
+            val sessionId = currentSessionId ?: return@launch
+            val newState = repository.toggleSubscribe(sessionId)
+            if (newState != null) {
+                _syncState.value = _syncState.value.copy(isSubscribed = newState.isSubscribed)
+                DebugLogger.d("SyncPlayerVM", "Subscribe state updated - Subscribed: ${newState.isSubscribed}")
+            }
+        }
     }
 
     fun incrementShare() {
         DebugLogger.i("SyncPlayerVM", "incrementShare() called")
-        val currentState = _syncState.value
-        _syncState.value = currentState.copy(shareCount = currentState.shareCount + 1)
+        viewModelScope.launch {
+            val sessionId = currentSessionId ?: return@launch
+            val newState = repository.incrementShare(sessionId)
+            if (newState != null) {
+                _syncState.value = _syncState.value.copy(shareCount = newState.shareCount)
+                DebugLogger.d("SyncPlayerVM", "Share count updated - Count: ${newState.shareCount}")
+            }
+        }
     }
 
     fun incrementComment() {
         DebugLogger.i("SyncPlayerVM", "incrementComment() called")
-        val currentState = _syncState.value
-        _syncState.value = currentState.copy(commentCount = currentState.commentCount + 1)
+        viewModelScope.launch {
+            val sessionId = currentSessionId ?: return@launch
+            val newState = repository.incrementComment(sessionId)
+            if (newState != null) {
+                _syncState.value = _syncState.value.copy(commentCount = newState.commentCount)
+                DebugLogger.d("SyncPlayerVM", "Comment count updated - Count: ${newState.commentCount}")
+            }
+        }
     }
 
     fun recordSyncCue(videoIndex: Int, cueTimeMs: Long, description: String = "") {
