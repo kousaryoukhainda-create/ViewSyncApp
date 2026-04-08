@@ -109,12 +109,15 @@ class OAuth2Manager(private val context: Context) {
             val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
             DebugLogger.i(TAG, "Sign-in successful - User: ${account.displayName}, Email: ${account.email}")
 
-            // Check granted scopes
-            val grantedScopes: List<String> = account.grantedScopes?.map { s: com.google.android.gms.common.api.Scope -> s.scope } ?: emptyList()
-            DebugLogger.d(TAG, "Granted scopes: $grantedScopes")
-
-            if (!hasYouTubeScope(grantedScopes)) {
-                DebugLogger.w(TAG, "YouTube scope not granted - some features may not work")
+            // Check granted scopes (best-effort, skip if API unavailable)
+            try {
+                val grantedScopes = account.grantedScopes?.map { it.toString() } ?: emptyList()
+                DebugLogger.d(TAG, "Granted scopes: $grantedScopes")
+                if (!grantedScopes.any { it.contains("youtube") }) {
+                    DebugLogger.w(TAG, "YouTube scope may not be granted - some features may not work")
+                }
+            } catch (e: Exception) {
+                DebugLogger.w(TAG, "Could not check granted scopes: ${e.message}")
             }
 
             account
@@ -159,11 +162,6 @@ class OAuth2Manager(private val context: Context) {
         )
 
         awaitClose { /* No cleanup needed */ }
-    }
-
-    private fun hasYouTubeScope(grantedScopes: List<String>): Boolean {
-        return grantedScopes.contains(YOUTUBE_SCOPE) ||
-               grantedScopes.contains("https://www.googleapis.com/auth/youtube")
     }
 }
 
