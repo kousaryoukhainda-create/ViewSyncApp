@@ -1,8 +1,10 @@
 package com.youkhainda.viewsync.ui.screen
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -83,17 +85,50 @@ private fun GoogleSignInBanner(onSignInClick: () -> Unit) {
 }
 
 /**
+ * JavaScript interface to receive callbacks from YouTube IFrame API
+ */
+class YouTubePlayerInterface(
+    private val onPlayerReady: () -> Unit,
+    private val onStateChange: (Int, Float, Float) -> Unit,
+    private val onError: (Int) -> Unit,
+) {
+    @JavascriptInterface
+    fun onPlayerReady() {
+        onPlayerReady()
+    }
+
+    @JavascriptInterface
+    fun onStateChange(stateJson: String) {
+        try {
+            val json = org.json.JSONObject(stateJson)
+            val state = json.optInt("state", -1)
+            val currentTime = json.optDouble("currentTime", 0.0).toFloat()
+            val duration = json.optDouble("duration", 0.0).toFloat()
+            onStateChange(state, currentTime, duration)
+        } catch (e: Exception) {
+            DebugLogger.w("YouTubePlayerInterface", "Error parsing state: ${e.message}")
+        }
+    }
+
+    @JavascriptInterface
+    fun onError(errorCode: Int) {
+        onError(errorCode)
+    }
+}
+
+/**
  * Interface to control YouTube players across all video cards
  */
 interface PlayerController {
     fun playAll()
     fun pauseAll()
     fun seekAll(positionMs: Long)
-    fun registerPlayer(index: Int, player: WebView)
+    fun registerPlayer(index: Int, player: WebView, playerInterface: YouTubePlayerInterface)
     fun unregisterPlayer(index: Int)
     fun getPlayerTime(index: Int): Float
     fun isPlayerPlaying(index: Int): Boolean
     fun setOnPlaybackStateChangeListener(listener: PlaybackStateChangeListener?)
+    fun isPlayerReady(index: Int): Boolean
 }
 
 /**
@@ -398,6 +433,7 @@ private fun VideoPlayerCard(
 ) {
     var currentTime by remember { mutableLongStateOf(0L) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var playerInterface by remember { mutableStateOf<YouTubePlayerInterface?>(null) }
     var showCueDialog by remember { mutableStateOf(false) }
     var isPlayerReady by remember { mutableStateOf(false) }
 
@@ -411,8 +447,10 @@ private fun VideoPlayerCard(
     DisposableEffect(videoIndex) {
         if (isValidVideoId && isPlayerReady) {
             webView?.let { player ->
-                playerController.registerPlayer(videoIndex, player)
-                DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Registered with controller")
+                playerInterface?.let { iface ->
+                    playerController.registerPlayer(videoIndex, player, iface)
+                    DebugLogger.d("VideoPlayerCard", "Video $videoIndex: Registered with controller")
+                }
             }
         }
         onDispose {
@@ -433,10 +471,11 @@ private fun VideoPlayerCard(
                 DirectYouTubeWebView(
                     videoId = videoId,
                     offset = offset,
-                    onWebViewReady = { view ->
+                    onWebViewReady = { view, iface ->
                         webView = view
+                        playerInterface = iface
                         isPlayerReady = true
-                        playerController.registerPlayer(videoIndex, view)
+                        playerController.registerPlayer(videoIndex, view, iface)
                         DebugLogger.i("VideoPlayerCard", "Video $videoIndex: WebView ready, registered with controller")
                     },
                     onCurrentSecond = { second ->
@@ -925,26 +964,48 @@ private fun dpToPx(dp: Int): Int {
  * This uses the official YouTube IFrame Player API which provides reliable
  * JavaScript methods for playback control (playVideo, pauseVideo, seekTo, etc.)
  */
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun DirectYouTubeWebView(
     videoId: String,
     offset: Long,
-    onWebViewReady: (WebView) -> Unit,
+    onWebViewReady: (WebView, YouTubePlayerInterface) -> Unit,
     onCurrentSecond: (Float) -> Unit,
     onError: () -> Unit,
 ) {
     val context = LocalContext.current
 
+    // Create JavaScript interface once
+    val playerInterface = remember {
+        YouTubePlayerInterface(
+            onPlayerReady = {
+                DebugLogger.i("DirectYouTubeWebView", "YouTube IFrame API is ready")
+            },
+            onStateChange = { state, currentTime, duration ->
+                DebugLogger.d("DirectYouTubeWebView", "State changed - State: $state, Time: $currentTime/$duration")
+                if (state == 1) { // Playing
+                    onCurrentSecond(currentTime)
+                }
+            },
+            onError = { errorCode ->
+                DebugLogger.e("DirectYouTubeWebView", "Player error - Code: $errorCode")
+                onError()
+            },
+        )
+    }
+
     DebugLogger.i("DirectYouTubeWebView", "Video: Initializing - ID: $videoId, Offset: ${offset}ms")
 
     // Create the HTML page with YouTube IFrame Player API
-    val htmlContent = """
+    val htmlContent = remember(videoId) {
+        """
         <!DOCTYPE html>
         <html>
         <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 body { margin: 0; padding: 0; background: #000; overflow: hidden; }
-                #player { width: 100%; height: 200px; }
+                #player { width: 100%; height: 100vh; }
             </style>
         </head>
         <body>
@@ -952,16 +1013,33 @@ private fun DirectYouTubeWebView(
             <script>
                 var player;
                 var isReady = false;
-                
+                var statePollingInterval = null;
+                var initTimeout = null;
+
                 // Load YouTube IFrame API
                 var tag = document.createElement('script');
                 tag.src = "https://www.youtube.com/iframe_api";
                 var firstScriptTag = document.getElementsByTagName('script')[0];
                 firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-                
+
+                // Set timeout to detect if API fails to load
+                initTimeout = setTimeout(function() {
+                    if (!isReady) {
+                        console.error('YouTube IFrame API initialization timeout');
+                        try {
+                            Android.onError(-1);
+                        } catch(e) {}
+                    }
+                }, 15000); // 15 second timeout
+
                 function onYouTubeIframeAPIReady() {
+                    console.log('YouTube IFrame API loaded');
+                    if (initTimeout) {
+                        clearTimeout(initTimeout);
+                        initTimeout = null;
+                    }
                     player = new YT.Player('player', {
-                        height: '200',
+                        height: '100%',
                         width: '100%',
                         videoId: '$videoId',
                         playerVars: {
@@ -969,7 +1047,8 @@ private fun DirectYouTubeWebView(
                             'controls': 1,
                             'rel': 0,
                             'modestbranding': 1,
-                            'enablejsapi': 1
+                            'enablejsapi': 1,
+                            'origin': 'https://www.youtube.com'
                         },
                         events: {
                             'onReady': onPlayerReady,
@@ -978,78 +1057,128 @@ private fun DirectYouTubeWebView(
                         }
                     });
                 }
-                
+
                 function onPlayerReady(event) {
                     isReady = true;
-                    window.onPlayerReady && window.onPlayerReady();
+                    console.log('Player is ready');
+                    // Notify Android via JavaScript interface
+                    try {
+                        Android.onPlayerReady();
+                    } catch(e) {
+                        console.log('Failed to notify Android: ' + e);
+                    }
+
+                    // Start polling state as backup
+                    startStatePolling();
                 }
-                
+
                 function onPlayerStateChange(event) {
                     var state = {
                         state: event.data,
                         currentTime: player.getCurrentTime(),
                         duration: player.getDuration()
                     };
-                    window.onStateChange && window.onStateChange(JSON.stringify(state));
+                    console.log('State changed: ' + JSON.stringify(state));
+
+                    // Notify Android via JavaScript interface
+                    try {
+                        Android.onStateChange(JSON.stringify(state));
+                    } catch(e) {
+                        console.log('Failed to notify Android: ' + e);
+                    }
                 }
-                
+
                 function onPlayerError(event) {
-                    window.onError && window.onError(event.data);
+                    console.log('Player error: ' + event.data);
+                    try {
+                        Android.onError(event.data);
+                    } catch(e) {
+                        console.log('Failed to notify Android: ' + e);
+                    }
                 }
-                
-                // Expose player methods to Android
+
+                function startStatePolling() {
+                    if (statePollingInterval) return;
+                    statePollingInterval = setInterval(function() {
+                        if (isReady && player) {
+                            var state = {
+                                state: player.getPlayerState(),
+                                currentTime: player.getCurrentTime(),
+                                duration: player.getDuration()
+                            };
+                            try {
+                                Android.onStateChange(JSON.stringify(state));
+                            } catch(e) {}
+                        }
+                    }, 500);
+                }
+
+                function stopStatePolling() {
+                    if (statePollingInterval) {
+                        clearInterval(statePollingInterval);
+                        statePollingInterval = null;
+                    }
+                }
+
+                // Expose player methods to Android (kept for backward compatibility)
                 window.playVideo = function() {
-                    if (player && player.playVideo) {
+                    if (player && isReady && player.playVideo) {
                         player.playVideo();
                         return 'played';
                     }
                     return 'not_ready';
                 };
-                
+
                 window.pauseVideo = function() {
-                    if (player && player.pauseVideo) {
+                    if (player && isReady && player.pauseVideo) {
                         player.pauseVideo();
                         return 'paused';
                     }
                     return 'not_ready';
                 };
-                
+
                 window.seekTo = function(seconds) {
-                    if (player && player.seekTo) {
+                    if (player && isReady && player.seekTo) {
                         player.seekTo(seconds, true);
                         return 'seeked';
                     }
                     return 'not_ready';
                 };
-                
+
                 window.getCurrentTime = function() {
-                    if (player && player.getCurrentTime) {
+                    if (player && isReady && player.getCurrentTime) {
                         return player.getCurrentTime();
                     }
                     return 0;
                 };
-                
+
                 window.getDuration = function() {
-                    if (player && player.getDuration) {
+                    if (player && isReady && player.getDuration) {
                         return player.getDuration();
                     }
                     return 0;
                 };
-                
+
                 window.getPlayerState = function() {
-                    if (player && player.getPlayerState) {
+                    if (player && isReady && player.getPlayerState) {
                         return player.getPlayerState();
                     }
                     return -1;
                 };
-                
+
                 window.isPlayerReady = function() {
                     return isReady;
                 };
+
+                // Cleanup on page unload
+                window.addEventListener('beforeunload', function() {
+                    stopStatePolling();
+                });
             </script>
         </body>
         </html>
     """.trimIndent()
+    }
 
     AndroidView(
         factory = { ctx ->
@@ -1077,12 +1206,15 @@ private fun DirectYouTubeWebView(
                     DebugLogger.d("DirectYouTubeWebView", "Video: WebView settings configured")
                 }
 
+                // Add JavaScript interface
+                addJavascriptInterface(playerInterface, "Android")
+
                 // Set WebViewClient to handle page loading
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         DebugLogger.d("DirectYouTubeWebView", "Video: HTML wrapper loaded, IFrame API will initialize")
-                        onWebViewReady(view ?: return)
+                        onWebViewReady(view ?: return, playerInterface)
                     }
 
                     override fun onReceivedError(
@@ -1095,6 +1227,15 @@ private fun DirectYouTubeWebView(
                         DebugLogger.e("DirectYouTubeWebView", "Video: Error loading page - $description")
                         onError()
                     }
+
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                        // Prevent navigation away from YouTube player
+                        val url = request?.url?.toString()
+                        if (url != null && !url.contains("youtube.com") && !url.contains("googlevideo.com")) {
+                            return true
+                        }
+                        return false
+                    }
                 }
 
                 // Load the HTML content with IFrame API
@@ -1102,11 +1243,15 @@ private fun DirectYouTubeWebView(
                 loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
             }
         },
+        update = { view ->
+            // This is called on recomposition - do nothing to prevent WebView recreation
+        },
         onRelease = { view ->
             DebugLogger.d("DirectYouTubeWebView", "Video: Releasing WebView")
             try {
                 view.stopLoading()
                 view.loadUrl("about:blank")
+                view.removeJavascriptInterface("Android")
                 view.destroy()
                 DebugLogger.d("DirectYouTubeWebView", "Video: WebView released successfully")
             } catch (e: Exception) {
@@ -1132,6 +1277,8 @@ fun rememberPlayerController(): PlayerController {
  */
 class PlayerControllerImpl : PlayerController {
     private val players = mutableMapOf<Int, WebView>()
+    private val playerInterfaces = mutableMapOf<Int, YouTubePlayerInterface>()
+    private val playerReadyStates = mutableMapOf<Int, Boolean>()
     private val playerStates = mutableMapOf<Int, PlayerState>()
     private var playbackListener: PlaybackStateChangeListener? = null
     private var pollingJob: Job? = null
@@ -1173,6 +1320,8 @@ class PlayerControllerImpl : PlayerController {
         stopPolling()
         coroutineScope.coroutineContext.cancel()
         players.clear()
+        playerInterfaces.clear()
+        playerReadyStates.clear()
         playerStates.clear()
         playbackListener = null
     }
@@ -1248,18 +1397,26 @@ class PlayerControllerImpl : PlayerController {
         DebugLogger.i("PlayerController", "playAll() called - ${players.size} players registered")
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Playing video $index")
-            val playScript = """
-                (function() {
-                    if (window.playVideo) {
-                        window.playVideo();
-                    } else {
-                        'no_api';
-                    }
-                })()
-            """.trimIndent()
 
-            webView.evaluateJavascript(playScript) { result ->
-                DebugLogger.d("PlayerController", "Video $index play result: $result")
+            // Check if player is ready first
+            webView.evaluateJavascript("window.isPlayerReady && window.isPlayerReady()") { readyResult ->
+                if (readyResult == "true") {
+                    val playScript = """
+                        (function() {
+                            if (window.playVideo) {
+                                window.playVideo();
+                            } else {
+                                'no_api';
+                            }
+                        })()
+                    """.trimIndent()
+
+                    webView.evaluateJavascript(playScript) { result ->
+                        DebugLogger.d("PlayerController", "Video $index play result: $result")
+                    }
+                } else {
+                    DebugLogger.w("PlayerController", "Video $index not ready yet, skipping play")
+                }
             }
         }
     }
@@ -1268,18 +1425,26 @@ class PlayerControllerImpl : PlayerController {
         DebugLogger.i("PlayerController", "pauseAll() called - ${players.size} players registered")
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Pausing video $index")
-            val pauseScript = """
-                (function() {
-                    if (window.pauseVideo) {
-                        window.pauseVideo();
-                    } else {
-                        'no_api';
-                    }
-                })()
-            """.trimIndent()
 
-            webView.evaluateJavascript(pauseScript) { result ->
-                DebugLogger.d("PlayerController", "Video $index pause result: $result")
+            // Check if player is ready first
+            webView.evaluateJavascript("window.isPlayerReady && window.isPlayerReady()") { readyResult ->
+                if (readyResult == "true") {
+                    val pauseScript = """
+                        (function() {
+                            if (window.pauseVideo) {
+                                window.pauseVideo();
+                            } else {
+                                'no_api';
+                            }
+                        })()
+                    """.trimIndent()
+
+                    webView.evaluateJavascript(pauseScript) { result ->
+                        DebugLogger.d("PlayerController", "Video $index pause result: $result")
+                    }
+                } else {
+                    DebugLogger.w("PlayerController", "Video $index not ready yet, skipping pause")
+                }
             }
         }
     }
@@ -1289,18 +1454,26 @@ class PlayerControllerImpl : PlayerController {
         players.forEach { (index, webView) ->
             DebugLogger.d("PlayerController", "Seeking player $index to ${positionMs}ms")
             val positionSeconds = positionMs / 1000f
-            val seekScript = """
-                (function() {
-                    if (window.seekTo) {
-                        window.seekTo($positionSeconds);
-                    } else {
-                        'no_api';
-                    }
-                })()
-            """.trimIndent()
 
-            webView.evaluateJavascript(seekScript) { result ->
-                DebugLogger.d("PlayerController", "Video $index seek result: $result")
+            // Check if player is ready first
+            webView.evaluateJavascript("window.isPlayerReady && window.isPlayerReady()") { readyResult ->
+                if (readyResult == "true") {
+                    val seekScript = """
+                        (function() {
+                            if (window.seekTo) {
+                                window.seekTo($positionSeconds);
+                            } else {
+                                'no_api';
+                            }
+                        })()
+                    """.trimIndent()
+
+                    webView.evaluateJavascript(seekScript) { result ->
+                        DebugLogger.d("PlayerController", "Video $index seek result: $result")
+                    }
+                } else {
+                    DebugLogger.w("PlayerController", "Video $index not ready yet, skipping seek")
+                }
             }
         }
     }
@@ -1313,12 +1486,18 @@ class PlayerControllerImpl : PlayerController {
         return playerStates[index]?.isPlaying ?: false
     }
 
+    override fun isPlayerReady(index: Int): Boolean {
+        return playerReadyStates[index] ?: false
+    }
+
     override fun setOnPlaybackStateChangeListener(listener: PlaybackStateChangeListener?) {
         playbackListener = listener
     }
 
-    override fun registerPlayer(index: Int, player: WebView) {
+    override fun registerPlayer(index: Int, player: WebView, playerInterface: YouTubePlayerInterface) {
         players[index] = player
+        playerInterfaces[index] = playerInterface
+        playerReadyStates[index] = false // Will be set to true when IFrame API is ready
         playerStates[index] = PlayerState()
         DebugLogger.d("PlayerController", "Player registered at index $index - Total: ${players.size}")
 
@@ -1330,6 +1509,8 @@ class PlayerControllerImpl : PlayerController {
 
     override fun unregisterPlayer(index: Int) {
         players.remove(index)
+        playerInterfaces.remove(index)
+        playerReadyStates.remove(index)
         playerStates.remove(index)
         DebugLogger.d("PlayerController", "Player unregistered at index $index - Total: ${players.size}")
 
