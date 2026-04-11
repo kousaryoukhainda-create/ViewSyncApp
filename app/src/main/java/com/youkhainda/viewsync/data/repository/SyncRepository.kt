@@ -280,6 +280,10 @@ class SyncRepository @Inject constructor(
         )
         syncSessions[session.id] = session
         DebugLogger.i("SyncRepository", "Session created with ID: ${session.id}")
+
+        // Persist to DataStore
+        persistSessions()
+
         session
     }
 
@@ -321,6 +325,10 @@ class SyncRepository @Inject constructor(
         )
         syncSessions[sessionId] = updatedSession
         DebugLogger.i("SyncRepository", "Session updated - Total videos: ${updatedSession.videoIds.size}")
+
+        // Persist to DataStore
+        persistSessions()
+
         updatedSession
     }
 
@@ -356,6 +364,10 @@ class SyncRepository @Inject constructor(
         )
         syncSessions[sessionId] = updatedSession
         DebugLogger.d("SyncRepository", "Sync cue added - Total cues: ${updatedSession.syncCues.size}")
+
+        // Persist to DataStore
+        persistSessions()
+
         true
     }
 
@@ -368,6 +380,10 @@ class SyncRepository @Inject constructor(
         )
         syncSessions[sessionId] = updatedSession
         DebugLogger.d("SyncRepository", "Sync cue removed - Remaining cues: ${updatedSession.syncCues.size}")
+
+        // Persist to DataStore
+        persistSessions()
+
         true
     }
 
@@ -379,6 +395,12 @@ class SyncRepository @Inject constructor(
         } else {
             DebugLogger.w("SyncRepository", "Session not found for deletion - ID: $sessionId")
         }
+
+        // Persist to DataStore
+        if (removed) {
+            persistSessions()
+        }
+
         removed
     }
 

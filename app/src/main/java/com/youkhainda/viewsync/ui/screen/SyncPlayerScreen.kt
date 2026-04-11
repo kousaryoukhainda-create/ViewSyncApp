@@ -1,7 +1,6 @@
 package com.youkhainda.viewsync.ui.screen
 
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -42,47 +41,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.cancel
 import org.json.JSONObject
-
-/**
- * Banner that prompts user to sign in with Google.
- * Shown when the user is not authenticated for social actions.
- */
-@Composable
-private fun GoogleSignInBanner(onSignInClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Sign in to YouTube",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-                Text(
-                    text = "Enable real likes, subscribes, and comments",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-            }
-            Button(
-                onClick = onSignInClick,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                ),
-            ) {
-                Text("Sign In")
-            }
-        }
-    }
-}
 
 /**
  * JavaScript interface to receive callbacks from YouTube IFrame API
@@ -158,7 +116,6 @@ fun SyncPlayerScreen(
     sessionId: String,
     viewModel: SyncPlayerViewModel = hiltViewModel(),
     onAddVideo: () -> Unit = {},
-    onSignInRequired: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
@@ -186,21 +143,15 @@ fun SyncPlayerScreen(
             is SyncPlayerUiState.Success -> {
                 DebugLogger.i("SyncPlayerScreen", "UI State: Success - Session: ${state.session.name}, Videos: ${state.session.videoIds.size}, Sync Cues: ${state.session.syncCues.size}")
 
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Google Sign-In Banner (if not authenticated)
-                    if (!viewModel.isUserAuthenticated()) {
-                        GoogleSignInBanner(
-                            onSignInClick = onSignInRequired,
-                        )
-                    }
+                val userName = viewModel.getCurrentUserName()
 
+                Column(modifier = Modifier.fillMaxSize()) {
                     SyncPlayerContent(
                         session = state.session,
                         shareLink = state.shareLink,
                         syncState = syncState,
                         videoOffsets = videoOffsets,
-                        isAuthenticated = viewModel.isUserAuthenticated(),
-                        userName = viewModel.getCurrentUserName(),
+                        userName = userName,
                         onPlay = { viewModel.play() },
                         onPause = { viewModel.pause() },
                         onSeek = { viewModel.seekToPosition(it) },
@@ -221,7 +172,7 @@ fun SyncPlayerScreen(
                 ErrorScreen(message = state.message)
             }
         }
-        
+
         // Debug toggle button in bottom-right corner
         DebugToggleButton(
             isVisible = showDebugOverlay,
@@ -231,7 +182,7 @@ fun SyncPlayerScreen(
                 .padding(16.dp),
         )
     }
-    
+
     // Debug overlay dialog
     DebugOverlay(
         isVisible = showDebugOverlay,
@@ -245,7 +196,6 @@ private fun SyncPlayerContent(
     shareLink: String,
     syncState: com.youkhainda.viewsync.data.model.SyncState,
     videoOffsets: Map<Int, Long>,
-    isAuthenticated: Boolean,
     userName: String?,
     onPlay: () -> Unit,
     onPause: () -> Unit,
@@ -296,8 +246,7 @@ private fun SyncPlayerContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
                     )
-                    // Show auth status
-                    if (isAuthenticated && userName != null) {
+                    if (userName != null) {
                         Text(
                             text = "Signed in as: $userName",
                             style = MaterialTheme.typography.labelSmall,
@@ -377,7 +326,6 @@ private fun SyncPlayerContent(
             videoShareCount = syncState.videoShareCount,
             videoCommentCount = syncState.videoCommentCount,
             videoViewCount = syncState.videoViewCount,
-            isAuthenticated = isAuthenticated,
             onPlay = {
                 playerController.playAll()
                 onPlay()
@@ -616,7 +564,6 @@ private fun PlaybackControlsSection(
     videoShareCount: Long,
     videoCommentCount: Long,
     videoViewCount: Long,
-    isAuthenticated: Boolean,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -719,7 +666,6 @@ private fun PlaybackControlsSection(
                     activeColor = MaterialTheme.colorScheme.primary,
                     onClick = onToggleLike,
                     label = "Like",
-                    enabled = isAuthenticated,
                 )
 
                 // Share button - shows view count as proxy
@@ -729,7 +675,6 @@ private fun PlaybackControlsSection(
                     isActive = false,
                     onClick = onIncrementShare,
                     label = "Views",
-                    enabled = true, // Views is always enabled (local only)
                 )
 
                 // Comment button - shows real YouTube comment count
@@ -739,14 +684,12 @@ private fun PlaybackControlsSection(
                     isActive = false,
                     onClick = onIncrementComment,
                     label = "Comments",
-                    enabled = isAuthenticated,
                 )
 
                 // Subscribe button
                 SubscribeButton(
                     isSubscribed = isSubscribed,
                     onClick = onToggleSubscribe,
-                    enabled = isAuthenticated,
                 )
             }
         }
@@ -833,7 +776,6 @@ private fun ActionButtonWithCount(
     activeColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.error,
     onClick: () -> Unit,
     label: String,
-    enabled: Boolean = true,
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -842,14 +784,11 @@ private fun ActionButtonWithCount(
         IconButton(
             onClick = onClick,
             modifier = Modifier.size(48.dp),
-            enabled = enabled,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (!enabled) {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                } else if (isActive) {
+                tint = if (isActive) {
                     activeColor
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -865,9 +804,7 @@ private fun ActionButtonWithCount(
                 Text(
                     text = formatCount(count),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (!enabled) {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                    } else if (isActive) {
+                    color = if (isActive) {
                         activeColor
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -878,11 +815,7 @@ private fun ActionButtonWithCount(
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = if (!enabled) {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -891,7 +824,6 @@ private fun ActionButtonWithCount(
 private fun SubscribeButton(
     isSubscribed: Boolean,
     onClick: () -> Unit,
-    enabled: Boolean = true,
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -899,11 +831,8 @@ private fun SubscribeButton(
     ) {
         Button(
             onClick = onClick,
-            enabled = enabled,
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (!enabled) {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                } else if (isSubscribed) {
+                containerColor = if (isSubscribed) {
                     MaterialTheme.colorScheme.surfaceVariant
                 } else {
                     MaterialTheme.colorScheme.error
