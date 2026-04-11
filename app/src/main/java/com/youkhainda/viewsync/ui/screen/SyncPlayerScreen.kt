@@ -71,18 +71,18 @@ class YouTubePlayerInterface(
     @JavascriptInterface
     fun onError(errorCode: Int) {
         DebugLogger.e("YouTubePlayerInterface", "YouTube Player Error - Code: $errorCode")
-        
+
         // Provide helpful error messages for common error codes
         val errorMessage = when (errorCode) {
             2 -> "Invalid video ID or parameter"
             5 -> "Content cannot be played in embedded player (restriction)"
             100 -> "Video not found or removed"
             101, 150 -> "Video owner has disabled embedding"
-            152 -> "Embedding blocked by security/privacy settings. Try disabling ad-blockers."
+            152 -> "Embedding blocked. Check: ad-blockers, network restrictions, or try different video"
             -1 -> "Player initialization failed or network error"
             else -> "Unknown error (code: $errorCode)"
         }
-        
+
         DebugLogger.e("YouTubePlayerInterface", errorMessage)
         onError(errorCode)
     }
@@ -987,6 +987,7 @@ private fun DirectYouTubeWebView(
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <meta name="referrer" content="no-referrer-when-downgrade">
+            <meta http-equiv="origin" content="https://www.youtube.com">
             <style>
                 body { margin: 0; padding: 0; background: #000; overflow: hidden; }
                 #player { width: 100%; height: 100vh; }
@@ -999,10 +1000,23 @@ private fun DirectYouTubeWebView(
                 var isReady = false;
                 var statePollingInterval = null;
                 var initTimeout = null;
+                var errorCount = 0;
 
                 // Load YouTube IFrame API
                 var tag = document.createElement('script');
                 tag.src = "https://www.youtube.com/iframe_api";
+                tag.onerror = function() {
+                    console.error('Failed to load YouTube IFrame API');
+                    errorCount++;
+                    if (errorCount < 3) {
+                        console.log('Retrying API load...');
+                        setTimeout(function() {
+                            var newTag = document.createElement('script');
+                            newTag.src = "https://www.youtube.com/iframe_api";
+                            document.getElementsByTagName('head')[0].appendChild(newTag);
+                        }, 1000);
+                    }
+                };
                 var firstScriptTag = document.getElementsByTagName('script')[0];
                 firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
@@ -1022,26 +1036,34 @@ private fun DirectYouTubeWebView(
                         clearTimeout(initTimeout);
                         initTimeout = null;
                     }
-                    player = new YT.Player('player', {
-                        height: '100%',
-                        width: '100%',
-                        videoId: '$videoId',
-                        playerVars: {
-                            'playsinline': 1,
-                            'controls': 1,
-                            'rel': 0,
-                            'modestbranding': 1,
-                            'enablejsapi': 1,
-                            'origin': 'https://localhost',
-                            'referrer': 'https://www.youtube.com',
-                            'widget_referrer': 'https://www.youtube.com'
-                        },
-                        events: {
-                            'onReady': onPlayerReady,
-                            'onStateChange': onPlayerStateChange,
-                            'onError': onPlayerError
-                        }
-                    });
+                    try {
+                        player = new YT.Player('player', {
+                            height: '100%',
+                            width: '100%',
+                            videoId: '$videoId',
+                            playerVars: {
+                                'playsinline': 1,
+                                'controls': 1,
+                                'rel': 0,
+                                'modestbranding': 1,
+                                'enablejsapi': 1,
+                                'origin': 'https://www.youtube.com',
+                                'widget_referrer': 'https://www.youtube.com',
+                                'hl': 'en'
+                            },
+                            events: {
+                                'onReady': onPlayerReady,
+                                'onStateChange': onPlayerStateChange,
+                                'onError': onPlayerError,
+                                'onApiChange': onApiChange
+                            }
+                        });
+                    } catch(e) {
+                        console.error('Failed to create YouTube player: ' + e.message);
+                        try {
+                            Android.onError(-1);
+                        } catch(ex) {}
+                    }
                 }
 
                 function onPlayerReady(event) {
@@ -1081,6 +1103,10 @@ private fun DirectYouTubeWebView(
                     } catch(e) {
                         console.log('Failed to notify Android: ' + e);
                     }
+                }
+
+                function onApiChange(event) {
+                    console.log('API changed - player modules may have updated');
                 }
 
                 function startStatePolling() {
@@ -1190,7 +1216,24 @@ private fun DirectYouTubeWebView(
                     useWideViewPort = true
                     loadWithOverviewMode = true
                     javaScriptCanOpenWindowsAutomatically = true
+                    // Set proper user-agent string (required by YouTube)
+                    userAgentString = "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
                     DebugLogger.d("DirectYouTubeWebView", "Video: WebView settings configured")
+                }
+
+                // Set WebChromeClient (REQUIRED for YouTube IFrame API)
+                webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage): Boolean {
+                        val tag = "DirectYouTubeWebView[JS]"
+                        when (consoleMessage.messageLevel()) {
+                            android.webkit.ConsoleMessage.MessageLevel.DEBUG -> DebugLogger.d(tag, consoleMessage.message())
+                            android.webkit.ConsoleMessage.MessageLevel.LOG -> DebugLogger.i(tag, consoleMessage.message())
+                            android.webkit.ConsoleMessage.MessageLevel.WARNING -> DebugLogger.w(tag, consoleMessage.message())
+                            android.webkit.ConsoleMessage.MessageLevel.ERROR -> DebugLogger.e(tag, consoleMessage.message())
+                            else -> DebugLogger.i(tag, consoleMessage.message())
+                        }
+                        return true
+                    }
                 }
 
                 // Add JavaScript interface
